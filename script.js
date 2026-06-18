@@ -489,6 +489,12 @@ function renderPracticeQuestion() {
   favToggleBtn.classList.toggle("active", isFav);
   favToggleBtn.querySelector("svg").setAttribute("fill", isFav ? "currentColor" : "none");
 
+  // Show and highlight sample input/setup code
+  const inputBlock = document.getElementById("practice-question-input");
+  if (inputBlock) {
+    inputBlock.innerHTML = highlightJavaCode(q.input || "");
+  }
+
   // Show user drafts/saved text area code
   const textarea = document.getElementById("practice-user-editor");
   textarea.value = state.drafts[q.id] || "";
