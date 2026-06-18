@@ -796,12 +796,13 @@ function setupEventListeners() {
     renderPracticeQuestion();
   });
 
-  // Copy title button
+  // Copy title button (copies commented question name and input setup code)
   document.getElementById("practice-copy-title").addEventListener("click", () => {
     const q = questions.find(item => item.id === state.currentId);
     if (q) {
-      navigator.clipboard.writeText(`${q.id}. ${q.title}`)
-        .then(() => showToast("Copied title to clipboard!"))
+      const copyText = `// Question ${q.id}: ${q.title}\n${q.input || ""}`;
+      navigator.clipboard.writeText(copyText)
+        .then(() => showToast("Copied commented title and setup code!"))
         .catch(() => showToast("Failed to copy", "error"));
     }
   });
