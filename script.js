@@ -8,7 +8,8 @@ let state = {
   theme: "dark",    // Current theme
   searchQuery: "",  // Active search query
   filterCategory: "all", // Active category pill filter
-  filterDifficulty: null // Active difficulty filter ("easy" | "medium" | null)
+  filterDifficulty: null, // Active difficulty filter ("easy" | "medium" | null)
+  includeSysout: false  // Toggle to add System.out.println statement in copied text
 };
 
 // Initialize State from LocalStorage
@@ -19,12 +20,14 @@ function loadState() {
   const localCurrent = localStorage.getItem("j8_currentId");
   const localDrafts = localStorage.getItem("j8_drafts");
   const localTheme = localStorage.getItem("j8_theme");
+  const localSysout = localStorage.getItem("j8_include_sysout");
 
   if (localSolved) state.solved = JSON.parse(localSolved);
   if (localFav) state.favorites = JSON.parse(localFav);
   if (localRecent) state.recent = JSON.parse(localRecent);
   if (localCurrent) state.currentId = parseInt(localCurrent, 10);
   if (localDrafts) state.drafts = JSON.parse(localDrafts);
+  if (localSysout) state.includeSysout = JSON.parse(localSysout);
   if (localTheme) {
     state.theme = localTheme;
   } else {
@@ -45,6 +48,7 @@ function saveState() {
   localStorage.setItem("j8_currentId", state.currentId.toString());
   localStorage.setItem("j8_drafts", JSON.stringify(state.drafts));
   localStorage.setItem("j8_theme", state.theme);
+  localStorage.setItem("j8_include_sysout", JSON.stringify(state.includeSysout));
 }
 
 // Custom Java Code Syntax Highlighter
@@ -483,6 +487,9 @@ function renderPracticeQuestion() {
   const catBadge = document.getElementById("practice-q-category");
   catBadge.textContent = q.category;
 
+  // Set the sysout toggle checkbox value
+  document.getElementById("practice-sysout-toggle").checked = state.includeSysout;
+
   // Favorite Star Toggle Display
   const isFav = state.favorites.includes(q.id);
   const favToggleBtn = document.getElementById("practice-favorite-toggle");
@@ -796,11 +803,15 @@ function setupEventListeners() {
     renderPracticeQuestion();
   });
 
-  // Copy title button (copies commented question name and input setup code)
+  // Copy title button (copies commented question name, optional sysout, and input setup code)
   document.getElementById("practice-copy-title").addEventListener("click", () => {
     const q = questions.find(item => item.id === state.currentId);
     if (q) {
-      const copyText = `// Question ${q.id}: ${q.title}\n${q.input || ""}`;
+      let copyText = `// Question ${q.id}: ${q.title}\n`;
+      if (state.includeSysout) {
+        copyText += `System.out.println("Question ${q.id}: ${q.title} \\n");\n`;
+      }
+      copyText += q.input || "";
       navigator.clipboard.writeText(copyText)
         .then(() => showToast("Copied commented title and setup code!"))
         .catch(() => showToast("Failed to copy", "error"));
@@ -826,6 +837,12 @@ function setupEventListeners() {
   document.getElementById("practice-favorite-toggle").addEventListener("click", () => {
     toggleFavorite(state.currentId);
     renderPracticeQuestion();
+  });
+
+  // Sysout Toggle change listener
+  document.getElementById("practice-sysout-toggle").addEventListener("change", (e) => {
+    state.includeSysout = e.target.checked;
+    saveState();
   });
 
   // User Code Editor draft save
