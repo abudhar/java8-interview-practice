@@ -9,7 +9,15 @@ let state = {
   searchQuery: "",  // Active search query
   filterCategory: "all", // Active category pill filter
   filterDifficulty: null, // Active difficulty filter ("easy" | "medium" | null)
-  includeSysout: false  // Toggle to add System.out.println statement in copied text
+  includeSysout: false, // Toggle to add System.out.println statement in copied text
+  
+  // Study Hub Fields
+  studyActiveModule: "m1", // Current active module ID
+  studyActiveStep: null,   // Current active step object (currently studying)
+  studyActiveCardIdx: 0,   // Index of current flashcard being viewed
+  studyMastered: {},       // Map of step path -> array of mastered question indices
+  studyViewMode: "flashcard", // Current study view mode ("flashcard" | "qalist")
+  studySearchQuery: ""    // Current search term in study modal
 };
 
 // Initialize State from LocalStorage
@@ -21,6 +29,8 @@ function loadState() {
   const localDrafts = localStorage.getItem("j8_drafts");
   const localTheme = localStorage.getItem("j8_theme");
   const localSysout = localStorage.getItem("j8_include_sysout");
+  const localStudyMastered = localStorage.getItem("j8_study_mastered");
+  const localStudyModule = localStorage.getItem("j8_study_active_module");
 
   if (localSolved) state.solved = JSON.parse(localSolved);
   if (localFav) state.favorites = JSON.parse(localFav);
@@ -28,6 +38,8 @@ function loadState() {
   if (localCurrent) state.currentId = parseInt(localCurrent, 10);
   if (localDrafts) state.drafts = JSON.parse(localDrafts);
   if (localSysout) state.includeSysout = JSON.parse(localSysout);
+  if (localStudyMastered) state.studyMastered = JSON.parse(localStudyMastered);
+  if (localStudyModule) state.studyActiveModule = localStudyModule;
   if (localTheme) {
     state.theme = localTheme;
   } else {
@@ -49,6 +61,8 @@ function saveState() {
   localStorage.setItem("j8_drafts", JSON.stringify(state.drafts));
   localStorage.setItem("j8_theme", state.theme);
   localStorage.setItem("j8_include_sysout", JSON.stringify(state.includeSysout));
+  localStorage.setItem("j8_study_mastered", JSON.stringify(state.studyMastered || {}));
+  localStorage.setItem("j8_study_active_module", state.studyActiveModule || "m1");
 }
 
 // Custom Java Code Syntax Highlighter
@@ -107,16 +121,16 @@ function highlightJavaCode(code) {
 function showToast(message, type = "success") {
   const toast = document.getElementById("custom-alert-toast");
   const msgText = document.getElementById("custom-alert-msg");
-  
+
   toast.className = `custom-alert ${type}`;
   msgText.textContent = message;
-  
+
   // Animate in
   toast.classList.add("show");
-  
+
   // Reset previous timer if active
   if (window.toastTimeout) clearTimeout(window.toastTimeout);
-  
+
   // Animate out
   window.toastTimeout = setTimeout(() => {
     toast.classList.remove("show");
@@ -163,12 +177,12 @@ function startConfetti() {
   const ctx = canvas.getContext("2d");
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
-  
+
   confettiParticles = [];
   for (let i = 0; i < 150; i++) {
     confettiParticles.push(new ConfettiParticle(canvas.width, canvas.height));
   }
-  
+
   if (!confettiActive) {
     confettiActive = true;
     animateConfetti(canvas, ctx);
@@ -181,12 +195,12 @@ function animateConfetti(canvas, ctx) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     return;
   }
-  
+
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  
+
   confettiParticles = confettiParticles.filter(p => p.update(canvas.width, canvas.height));
   confettiParticles.forEach(p => p.draw(ctx));
-  
+
   requestAnimationFrame(() => animateConfetti(canvas, ctx));
 }
 
@@ -204,7 +218,7 @@ function switchToView(viewName) {
   document.querySelectorAll(".view-panel").forEach(panel => {
     panel.classList.remove("active");
   });
-  
+
   // Show target panel
   const targetPanel = document.getElementById(`view-${viewName}`);
   if (targetPanel) {
@@ -231,8 +245,10 @@ function switchToView(viewName) {
     renderSolvedListView();
   } else if (viewName === "progress") {
     renderProgressDashboard();
+  } else if (viewName === "study-hub") {
+    renderStudyHub();
   }
-  
+
   // Scroll to top
   window.scrollTo(0, 0);
 }
@@ -269,7 +285,7 @@ function updateGlobalProgress() {
 // Render Home View
 function renderHomeView() {
   const stats = getProgressStats();
-  
+
   // Welcome Text
   const welcomeTitle = document.getElementById("welcome-title");
   if (stats.percentage === 100) {
@@ -342,9 +358,9 @@ function renderHomeView() {
   // Render Categories Dashboard Cards with Item Counts and Performance
   const categoryGrid = document.getElementById("home-categories-grid");
   categoryGrid.innerHTML = "";
-  
+
   const categoriesList = ["Streams", "Collectors", "Arrays", "Strings", "Numbers", "Sorting", "Miscellaneous"];
-  
+
   // Categorized Icons Mapping
   const icons = {
     Streams: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`,
@@ -359,7 +375,7 @@ function renderHomeView() {
   categoriesList.forEach(cat => {
     const catQs = questions.filter(q => q.category === cat);
     const catSolved = catQs.filter(q => state.solved.includes(q.id));
-    
+
     const div = document.createElement("div");
     div.className = "category-card";
     div.innerHTML = `
@@ -392,11 +408,11 @@ function renderAllQuestionsTable() {
   const filtered = questions.filter(q => {
     // Search Query (Match title or category)
     const matchesSearch = q.title.toLowerCase().includes(state.searchQuery.toLowerCase()) ||
-                          q.category.toLowerCase().includes(state.searchQuery.toLowerCase());
-    
+      q.category.toLowerCase().includes(state.searchQuery.toLowerCase());
+
     // Category Filter
     const matchesCategory = state.filterCategory === "all" || q.category === state.filterCategory;
-    
+
     // Difficulty Filter
     const matchesDifficulty = !state.filterDifficulty || q.difficulty.toLowerCase() === state.filterDifficulty;
 
@@ -421,13 +437,13 @@ function renderAllQuestionsTable() {
   filtered.forEach(q => {
     const isSolved = state.solved.includes(q.id);
     const isFavorite = state.favorites.includes(q.id);
-    
+
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td class="td-status">
-        ${isSolved 
-          ? `<i class="solved"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></i>` 
-          : `<i class="unsolved"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg></i>`}
+        ${isSolved
+        ? `<i class="solved"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></i>`
+        : `<i class="unsolved"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg></i>`}
       </td>
       <td class="td-id">${q.id}</td>
       <td class="td-title" id="title-lnk-${q.id}">${q.title}</td>
@@ -479,7 +495,7 @@ function renderPracticeQuestion() {
   // Setup header badges & title
   document.getElementById("practice-q-number").textContent = `Question ${q.id} of ${questions.length}`;
   document.getElementById("practice-q-title").textContent = q.title;
-  
+
   const diffBadge = document.getElementById("practice-q-difficulty");
   diffBadge.textContent = q.difficulty;
   diffBadge.className = `badge-difficulty ${q.difficulty.toLowerCase()}`;
@@ -510,7 +526,7 @@ function renderPracticeQuestion() {
   const drawer = document.getElementById("practice-solution-drawer");
   const toggleBtn = document.getElementById("practice-toggle-solution");
   const toggleText = document.getElementById("solution-toggle-text");
-  
+
   drawer.classList.remove("open");
   drawer.style.maxHeight = null;
   toggleBtn.classList.remove("showing");
@@ -547,10 +563,10 @@ function renderSolvedListView() {
   container.innerHTML = "";
 
   const solvedQs = questions.filter(q => state.solved.includes(q.id));
-  
+
   // Update Solved stats overview boxes
   document.getElementById("solved-stats-count").textContent = `${solvedQs.length} / ${questions.length}`;
-  
+
   const easySolvedCount = solvedQs.filter(q => q.difficulty === "Easy").length;
   const mediumSolvedCount = solvedQs.filter(q => q.difficulty === "Medium").length;
   document.getElementById("solved-stats-easy").textContent = easySolvedCount;
@@ -687,7 +703,7 @@ function getRandomQuestionId() {
 
   // Filter out the current active ID
   const options = questions.filter(q => q.id !== state.currentId);
-  
+
   // Prefer unsolved questions if possible
   const unsolvedOptions = options.filter(q => !state.solved.includes(q.id));
   const pool = unsolvedOptions.length > 0 ? unsolvedOptions : options;
@@ -702,7 +718,7 @@ function getRandomQuestionId() {
 
 // Attach UI Event Listeners
 function setupEventListeners() {
-  
+
   // Sidebar view links
   document.querySelectorAll(".sidebar-item-link").forEach(link => {
     link.addEventListener("click", () => {
@@ -741,7 +757,7 @@ function setupEventListeners() {
     pill.addEventListener("click", () => {
       document.querySelectorAll("#category-filter-pills .filter-pill").forEach(p => p.classList.remove("active"));
       pill.classList.add("active");
-      
+
       state.filterCategory = pill.getAttribute("data-category");
       renderAllQuestionsTable();
     });
@@ -809,7 +825,7 @@ function setupEventListeners() {
     if (q) {
       let copyText = `// Question ${q.id}: ${q.title}\n`;
       if (state.includeSysout) {
-        copyText += `System.out.println("Question ${q.id}: ${q.title} \\n");\n`;
+        copyText += `System.out.print("Question ${q.id}: ${q.title} : ");\n`;
       }
       copyText += q.input || "";
       navigator.clipboard.writeText(copyText)
@@ -824,12 +840,12 @@ function setupEventListeners() {
     const drawer = document.getElementById("practice-solution-drawer");
     const toggleBtn = document.getElementById("practice-toggle-solution");
     const toggleText = document.getElementById("solution-toggle-text");
-    
+
     drawer.classList.add("open");
     drawer.style.maxHeight = "none";
     toggleBtn.classList.add("showing");
     toggleText.textContent = "Hide Solution";
-    
+
     window.print();
   });
 
@@ -912,7 +928,7 @@ function setupEventListeners() {
   // -------------------------------------------------------------
   // PROGRESS VIEW CONTROLS (IMPORT/EXPORT/CLEAR)
   // -------------------------------------------------------------
-  
+
   // Export JSON backup file
   document.getElementById("progress-export-btn").addEventListener("click", () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(
@@ -935,16 +951,16 @@ function setupEventListeners() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = function(evt) {
+    reader.onload = function (evt) {
       try {
         const imported = JSON.parse(evt.target.result);
-        
+
         // Validation check
         if (imported && (Array.isArray(imported.solved) || Array.isArray(imported.favorites) || typeof imported.drafts === "object")) {
           if (Array.isArray(imported.solved)) state.solved = imported.solved.filter(x => typeof x === "number");
           if (Array.isArray(imported.favorites)) state.favorites = imported.favorites.filter(x => typeof x === "number");
           if (imported.drafts && typeof imported.drafts === "object") state.drafts = imported.drafts;
-          
+
           saveState();
           updateGlobalProgress();
           switchToView("progress");
@@ -967,6 +983,125 @@ function setupEventListeners() {
       clearAllData();
     }
   });
+
+  // -------------------------------------------------------------
+  // STUDY HUB EVENT LISTENERS
+  // -------------------------------------------------------------
+  
+  // Study Modal search input
+  document.getElementById("study-modal-search").addEventListener("input", (e) => {
+    state.studySearchQuery = e.target.value;
+    state.studyActiveCardIdx = 0; // reset to first matching card
+    renderStudySession();
+  });
+
+  // Toggle Flashcard / QA List view in study session
+  document.getElementById("btn-toggle-flashcards").addEventListener("click", () => {
+    state.studyViewMode = "flashcard";
+    document.getElementById("btn-toggle-flashcards").classList.add("active");
+    document.getElementById("btn-toggle-qalist").classList.remove("active");
+    renderStudySession();
+  });
+
+  document.getElementById("btn-toggle-qalist").addEventListener("click", () => {
+    state.studyViewMode = "qalist";
+    document.getElementById("btn-toggle-qalist").classList.add("active");
+    document.getElementById("btn-toggle-flashcards").classList.remove("active");
+    renderStudySession();
+  });
+
+  // 3D Card Flip action
+  const flipCard = document.getElementById("study-flip-card");
+  flipCard.addEventListener("click", (e) => {
+    // Don't flip card if clicking inside answer scroll (scrollbar, coding textareas, code solution wrappers, buttons)
+    if (flipCard.classList.contains("flipped") && e.target.closest("#flashcard-answer-container")) {
+      return;
+    }
+    flipCard.classList.toggle("flipped");
+  });
+
+  // Reveal coding solution button
+  document.getElementById("study-reveal-code-btn").addEventListener("click", (e) => {
+    e.stopPropagation(); // prevent card flip
+    const wrapper = document.getElementById("study-code-solution-wrapper");
+    const btn = document.getElementById("study-reveal-code-btn");
+    if (wrapper.style.display === "none") {
+      wrapper.style.display = "block";
+      btn.textContent = "Hide Solution Code";
+    } else {
+      wrapper.style.display = "none";
+      btn.textContent = "Show Solution Code";
+    }
+  });
+
+  // Navigation Controls (Prev/Next card)
+  document.getElementById("study-prev-card-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (state.studyActiveCardIdx > 0) {
+      state.studyActiveCardIdx--;
+      renderStudySession();
+    }
+  });
+
+  document.getElementById("study-next-card-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const items = getFilteredStudyItems();
+    if (state.studyActiveCardIdx < items.length - 1) {
+      state.studyActiveCardIdx++;
+      renderStudySession();
+    }
+  });
+
+  // Mark as Mastered button inside study modal
+  document.getElementById("study-toggle-mastered-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const items = getFilteredStudyItems();
+    const currentIdx = state.studyActiveCardIdx;
+    if (items.length > 0 && currentIdx < items.length) {
+      const item = items[currentIdx];
+      const step = state.studyActiveStep;
+      const originalIndex = step.items.indexOf(item);
+      
+      if (!state.studyMastered[step.rel_path]) {
+        state.studyMastered[step.rel_path] = [];
+      }
+      
+      const masteredIdx = state.studyMastered[step.rel_path].indexOf(originalIndex);
+      if (masteredIdx > -1) {
+        state.studyMastered[step.rel_path].splice(masteredIdx, 1);
+        showToast("Marked question as incomplete.");
+      } else {
+        state.studyMastered[step.rel_path].push(originalIndex);
+        showToast("Marked question as mastered!", "success");
+      }
+      saveState();
+      renderStudySession();
+      renderStudyHub();
+    }
+  });
+
+  // Modal Close Button
+  document.getElementById("study-modal-close-btn").addEventListener("click", () => {
+    document.getElementById("study-modal").classList.remove("active");
+    state.studyActiveStep = null;
+    saveState();
+    renderStudyHub();
+  });
+
+  // Study modal code editor draft listener
+  const studyEditor = document.getElementById("study-user-editor");
+  studyEditor.addEventListener("input", () => {
+    const step = state.studyActiveStep;
+    const items = getFilteredStudyItems();
+    const currentIdx = state.studyActiveCardIdx;
+    if (step && items.length > 0 && currentIdx < items.length) {
+      const item = items[currentIdx];
+      const originalIndex = step.items.indexOf(item);
+      const draftKey = `study_${step.rel_path}_${originalIndex}`;
+      state.drafts[draftKey] = studyEditor.value;
+      saveState();
+    }
+  });
 }
 
 // Full Clear State Utility
@@ -978,7 +1113,9 @@ function clearAllData() {
   state.currentId = 1;
   state.drafts = {};
   state.theme = "dark";
-  
+  state.studyMastered = {};
+  state.studyActiveModule = "m1";
+
   document.documentElement.setAttribute("data-theme", "dark");
   saveState();
   updateGlobalProgress();
@@ -997,7 +1134,7 @@ function handleKeyboardShortcuts(e) {
   }
 
   const key = e.key.toLowerCase();
-  
+
   if (e.key === "ArrowRight") {
     // Next Question
     if (state.currentId < questions.length) {
@@ -1055,13 +1192,374 @@ function handleKeyboardShortcuts(e) {
   }
 }
 
+// ==========================================================================
+// STUDY HUB ACTIONS & RENDERING
+// ==========================================================================
+
+function toggleReferenceDone(step) {
+  if (!state.studyMastered[step.rel_path]) {
+    state.studyMastered[step.rel_path] = [];
+  }
+  const idx = state.studyMastered[step.rel_path].indexOf(0);
+  if (idx > -1) {
+    state.studyMastered[step.rel_path].splice(idx, 1);
+    showToast("Marked topic as incomplete.");
+  } else {
+    state.studyMastered[step.rel_path].push(0);
+    showToast("Marked topic as read/done!", "success");
+  }
+  saveState();
+}
+
+function renderStudyHub() {
+  const studyTabsContainer = document.getElementById("study-module-tabs");
+  if (!studyTabsContainer) return;
+  studyTabsContainer.innerHTML = "";
+
+  Object.keys(materialsData).forEach(mId => {
+    const mod = materialsData[mId];
+    const button = document.createElement("button");
+    button.className = `study-tab ${state.studyActiveModule === mId ? "active" : ""}`;
+    button.textContent = mod.name;
+    button.addEventListener("click", () => {
+      state.studyActiveModule = mId;
+      saveState();
+      renderStudyHub();
+    });
+    studyTabsContainer.appendChild(button);
+  });
+
+  const activeMod = materialsData[state.studyActiveModule];
+  const totalSteps = activeMod.steps.length;
+  let completedSteps = 0;
+  let totalItemsCount = 0;
+  let totalMasteredCount = 0;
+
+  activeMod.steps.forEach(step => {
+    const mastered = state.studyMastered[step.rel_path] || [];
+    if (step.type === "qa" || step.type === "coding") {
+      totalItemsCount += step.items.length;
+      totalMasteredCount += mastered.length;
+      if (step.items.length > 0 && mastered.length === step.items.length) {
+        completedSteps++;
+      }
+    } else {
+      if (mastered.includes(0)) {
+        completedSteps++;
+        totalMasteredCount += 1;
+      }
+      totalItemsCount += 1;
+    }
+  });
+
+  const overallPercentage = totalItemsCount > 0 ? Math.round((totalMasteredCount / totalItemsCount) * 100) : 0;
+  
+  document.getElementById("study-total-steps").textContent = totalSteps;
+  document.getElementById("study-completed-steps").textContent = `${completedSteps} / ${totalSteps}`;
+  document.getElementById("study-module-percentage").textContent = `${overallPercentage}%`;
+  document.getElementById("study-module-progress-fill").style.width = `${overallPercentage}%`;
+
+  const stepsContainer = document.getElementById("roadmap-steps-container");
+  stepsContainer.innerHTML = "";
+
+  if (activeMod.steps.length === 0) {
+    stepsContainer.innerHTML = `<div class="item-list-empty">No topics available in this module.</div>`;
+    return;
+  }
+
+  activeMod.steps.forEach((step, idx) => {
+    const mastered = state.studyMastered[step.rel_path] || [];
+    let stepPercent = 0;
+    let progressText = "";
+    
+    if (step.type === "qa" || step.type === "coding") {
+      const total = step.items.length;
+      stepPercent = total > 0 ? Math.round((mastered.length / total) * 100) : 0;
+      progressText = `${mastered.length} / ${total} Mastered`;
+    } else {
+      const isDone = mastered.includes(0);
+      stepPercent = isDone ? 100 : 0;
+      progressText = isDone ? "Read & Done" : "Not Read";
+    }
+
+    const card = document.createElement("div");
+    card.className = "card-premium step-card";
+    
+    let typeBadgeClass = step.type; // qa, coding, reference, resume
+    let typeBadgeText = step.type === "qa" ? "Theory Q&A" : 
+                        step.type === "coding" ? "Coding Challenge" : 
+                        step.type === "reference" ? "Revision Notes" : "Resume Tips";
+
+    card.innerHTML = `
+      <div class="step-card-header">
+        <div style="flex-grow: 1;">
+          <span class="step-card-badge ${typeBadgeClass}">${typeBadgeText}</span>
+          <h3 class="step-card-title" style="margin-top: 8px;">${step.title}</h3>
+        </div>
+      </div>
+      
+      <div class="step-card-meta">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/></svg>
+        <span>${step.pages} pages (${step.size_kb} KB)</span>
+      </div>
+
+      <div class="step-card-progress">
+        <span>Progress: ${stepPercent}%</span>
+        <span style="font-size: 0.75rem; color: var(--text-muted);">${progressText}</span>
+      </div>
+      <div class="step-card-progress-bar-container">
+        <div class="step-card-progress-bar-fill" style="width: ${stepPercent}%;"></div>
+      </div>
+
+      <div class="step-card-actions">
+        ${(step.type === "qa" || step.type === "coding") 
+          ? `<button class="btn-primary" id="study-btn-${idx}">
+               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+               <span>Study Interactively</span>
+             </button>` 
+          : `<button class="btn-primary" id="mark-done-btn-${idx}">
+               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+               <span>${stepPercent === 100 ? "Done" : "Mark as Done"}</span>
+             </button>`
+        }
+        <a href="${step.rel_path}" target="_blank" class="btn-secondary" id="pdf-btn-${idx}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span>View PDF</span>
+        </a>
+      </div>
+    `;
+
+    // Button handlers
+    if (step.type === "qa" || step.type === "coding") {
+      card.querySelector(`#study-btn-${idx}`).addEventListener("click", () => {
+        openStudySession(step);
+      });
+    } else {
+      card.querySelector(`#mark-done-btn-${idx}`).addEventListener("click", () => {
+        toggleReferenceDone(step);
+        renderStudyHub();
+      });
+    }
+
+    stepsContainer.appendChild(card);
+  });
+}
+
+function openStudySession(step) {
+  state.studyActiveStep = step;
+  state.studyActiveCardIdx = 0;
+  state.studySearchQuery = "";
+  state.studyViewMode = "flashcard";
+  
+  const searchInput = document.getElementById("study-modal-search");
+  if (searchInput) searchInput.value = "";
+  
+  document.getElementById("btn-toggle-flashcards").classList.add("active");
+  document.getElementById("btn-toggle-qalist").classList.remove("active");
+  
+  document.getElementById("study-modal").classList.add("active");
+  renderStudySession();
+}
+
+function getFilteredStudyItems() {
+  const step = state.studyActiveStep;
+  if (!step || !step.items) return [];
+  if (!state.studySearchQuery) return step.items;
+  return step.items.filter(item => {
+    const qText = (item.q || item.title || "").toLowerCase();
+    const aText = (item.a || item.problem || item.solution || item.explanation || "").toLowerCase();
+    const query = state.studySearchQuery.toLowerCase();
+    return qText.includes(query) || aText.includes(query);
+  });
+}
+
+function renderStudySession() {
+  const step = state.studyActiveStep;
+  if (!step) return;
+
+  const items = getFilteredStudyItems();
+  const total = items.length;
+  
+  // Clamping active card index
+  if (state.studyActiveCardIdx >= total) {
+    state.studyActiveCardIdx = Math.max(0, total - 1);
+  }
+  const currentIdx = state.studyActiveCardIdx;
+
+  // Header step info
+  document.getElementById("study-modal-step-title").textContent = step.title;
+  
+  // Progress Bar & Stats
+  const progressText = total > 0 ? `${currentIdx + 1} / ${total}` : "0 / 0";
+  const progressPercent = total > 0 ? ((currentIdx + 1) / total) * 100 : 0;
+  document.getElementById("study-modal-progress-text").textContent = progressText;
+  document.getElementById("study-modal-progress-fill").style.width = `${progressPercent}%`;
+
+  if (state.studyViewMode === "flashcard") {
+    document.getElementById("study-flashcard-view").style.display = "flex";
+    document.getElementById("study-qalist-view").style.display = "none";
+    
+    const card = document.getElementById("study-flip-card");
+    card.classList.remove("flipped"); // Always show question side first
+
+    if (total === 0) {
+      document.getElementById("flashcard-question").textContent = "No questions found matching search criteria.";
+      document.getElementById("flashcard-answer").textContent = "";
+      document.getElementById("flashcard-coding-area").style.display = "none";
+      document.getElementById("study-prev-card-btn").disabled = true;
+      document.getElementById("study-next-card-btn").disabled = true;
+      document.getElementById("study-toggle-mastered-btn").disabled = true;
+      return;
+    }
+
+    document.getElementById("study-prev-card-btn").disabled = (currentIdx === 0);
+    document.getElementById("study-next-card-btn").disabled = (currentIdx === total - 1);
+    document.getElementById("study-toggle-mastered-btn").disabled = false;
+
+    const item = items[currentIdx];
+    const originalIndex = step.items.indexOf(item);
+    
+    // Front side (Question / Problem title)
+    document.getElementById("flashcard-question").textContent = item.q || item.title || item.problem;
+
+    // Back side (Answer / Explanation)
+    document.getElementById("flashcard-answer").textContent = item.a || item.problem || "";
+    
+    // Coding task elements
+    const codingArea = document.getElementById("flashcard-coding-area");
+    if (step.type === "coding") {
+      codingArea.style.display = "block";
+      
+      const codeBlock = document.getElementById("study-code-solution");
+      codeBlock.innerHTML = highlightJavaCode(item.solution || "");
+      
+      document.getElementById("study-code-explanation").textContent = item.explanation || "";
+      
+      // Hide solution by default
+      document.getElementById("study-code-solution-wrapper").style.display = "none";
+      document.getElementById("study-reveal-code-btn").textContent = "Show Solution Code";
+      
+      // Restore draft
+      const draftKey = `study_${step.rel_path}_${originalIndex}`;
+      document.getElementById("study-user-editor").value = state.drafts[draftKey] || "";
+    } else {
+      codingArea.style.display = "none";
+    }
+
+    // Mastered button styling
+    const mastered = state.studyMastered[step.rel_path] || [];
+    const isMastered = mastered.includes(originalIndex);
+    const masteredBtn = document.getElementById("study-toggle-mastered-btn");
+    const masteredText = document.getElementById("study-mastered-btn-text");
+
+    if (isMastered) {
+      masteredText.textContent = "Mastered";
+      masteredBtn.style.backgroundColor = "var(--accent-success)";
+    } else {
+      masteredText.textContent = "Mark as Mastered";
+      masteredBtn.style.backgroundColor = "";
+    }
+  } else {
+    // QA List View
+    document.getElementById("study-flashcard-view").style.display = "none";
+    const qalistContainer = document.getElementById("study-qalist-view");
+    qalistContainer.style.display = "flex";
+    qalistContainer.innerHTML = "";
+
+    if (total === 0) {
+      qalistContainer.innerHTML = `<div class="item-list-empty">No questions found matching search criteria.</div>`;
+      return;
+    }
+
+    items.forEach(item => {
+      const originalIndex = step.items.indexOf(item);
+      const mastered = state.studyMastered[step.rel_path] || [];
+      const isMastered = mastered.includes(originalIndex);
+      
+      const itemDiv = document.createElement("div");
+      itemDiv.className = "qalist-item";
+      itemDiv.id = `qalist-item-${originalIndex}`;
+      itemDiv.innerHTML = `
+        <div class="qalist-question-row" id="qalist-row-${originalIndex}">
+          <div class="qalist-meta">
+            ${isMastered ? '<span class="qalist-mastered-badge">Mastered</span>' : ''}
+            <span>${item.q || item.title}</span>
+          </div>
+          <svg class="qalist-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="qalist-answer-drawer" id="qalist-drawer-${originalIndex}">
+          <div class="qalist-answer-content">
+            <div style="white-space: pre-wrap; margin-bottom: 15px;">${item.a || item.problem || ''}</div>
+            ${step.type === "coding" 
+              ? `<div style="margin-top: 15px;">
+                   <strong>Java 8 Solution:</strong>
+                   <div class="code-block-container" style="margin-top: 8px;">
+                     <pre class="solution-code-pre"><code class="java-code-block">${highlightJavaCode(item.solution || "")}</code></pre>
+                   </div>
+                   ${item.explanation ? `<div style="margin-top: 10px; color: var(--text-muted); font-size: 0.85rem;">${item.explanation}</div>` : ''}
+                 </div>` 
+              : ''
+            }
+            <button class="btn-secondary" style="margin-top: 15px; font-size: 0.8rem;" id="qalist-master-btn-${originalIndex}">
+              ${isMastered ? 'Mark Incomplete' : 'Mark Mastered'}
+            </button>
+          </div>
+        </div>
+      `;
+
+      // Accordion click handler
+      itemDiv.querySelector(`#qalist-row-${originalIndex}`).addEventListener("click", () => {
+        const isOpen = itemDiv.classList.contains("open");
+        const drawer = itemDiv.querySelector(`#qalist-drawer-${originalIndex}`);
+        
+        // Close others
+        document.querySelectorAll(".qalist-item").forEach(otherItem => {
+          if (otherItem !== itemDiv && otherItem.classList.contains("open")) {
+            otherItem.classList.remove("open");
+            otherItem.querySelector(".qalist-answer-drawer").style.maxHeight = "0px";
+          }
+        });
+
+        if (isOpen) {
+          itemDiv.classList.remove("open");
+          drawer.style.maxHeight = "0px";
+        } else {
+          itemDiv.classList.add("open");
+          drawer.style.maxHeight = drawer.scrollHeight + "px";
+        }
+      });
+
+      // Mastered toggle handler
+      itemDiv.querySelector(`#qalist-master-btn-${originalIndex}`).addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (!state.studyMastered[step.rel_path]) {
+          state.studyMastered[step.rel_path] = [];
+        }
+        const mIdx = state.studyMastered[step.rel_path].indexOf(originalIndex);
+        if (mIdx > -1) {
+          state.studyMastered[step.rel_path].splice(mIdx, 1);
+          showToast("Marked question as incomplete.");
+        } else {
+          state.studyMastered[step.rel_path].push(originalIndex);
+          showToast("Marked question as mastered!", "success");
+        }
+        saveState();
+        renderStudySession();
+        renderStudyHub();
+      });
+
+      qalistContainer.appendChild(itemDiv);
+    });
+  }
+}
+
 // Initialize Application
 document.addEventListener("DOMContentLoaded", () => {
   loadState();
   document.documentElement.setAttribute("data-theme", state.theme);
   updateGlobalProgress();
   setupEventListeners();
-  
+
   // Bind Keyboard listener
   window.addEventListener("keydown", handleKeyboardShortcuts);
 
