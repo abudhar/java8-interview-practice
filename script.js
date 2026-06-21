@@ -225,9 +225,10 @@ function switchToView(viewName) {
     targetPanel.classList.add("active");
   }
 
-  // Update active states in Sidebar
+  // Update active states in Sidebar (highlight study-hub sidebar tab during study-session too)
   document.querySelectorAll(".sidebar-item-link").forEach(link => {
-    if (link.getAttribute("data-view") === viewName) {
+    const view = link.getAttribute("data-view");
+    if (view === viewName || (view === "study-hub" && viewName === "study-session")) {
       link.classList.add("active");
     } else {
       link.classList.remove("active");
@@ -247,6 +248,8 @@ function switchToView(viewName) {
     renderProgressDashboard();
   } else if (viewName === "study-hub") {
     renderStudyHub();
+  } else if (viewName === "study-session") {
+    renderStudySession();
   }
 
   // Scroll to top
@@ -512,10 +515,22 @@ function renderPracticeQuestion() {
   favToggleBtn.classList.toggle("active", isFav);
   favToggleBtn.querySelector("svg").setAttribute("fill", isFav ? "currentColor" : "none");
 
+  // Reset tab selection to Sample Input
+  document.getElementById("btn-info-input").classList.add("active");
+  document.getElementById("btn-info-output").classList.remove("active");
+  document.getElementById("practice-input-wrapper").style.display = "block";
+  document.getElementById("practice-output-wrapper").style.display = "none";
+
   // Show and highlight sample input/setup code
   const inputBlock = document.getElementById("practice-question-input");
   if (inputBlock) {
     inputBlock.innerHTML = highlightJavaCode(q.input || "");
+  }
+
+  // Render and highlight expected output code
+  const outputBlock = document.getElementById("practice-question-output");
+  if (outputBlock) {
+    outputBlock.textContent = q.expectedOutput || "// No expected output specified";
   }
 
   // Show user drafts/saved text area code
@@ -988,54 +1003,59 @@ function setupEventListeners() {
   // STUDY HUB EVENT LISTENERS
   // -------------------------------------------------------------
   
-  // Study Modal search input
-  document.getElementById("study-modal-search").addEventListener("input", (e) => {
+  // Study session search input
+  document.getElementById("study-session-search").addEventListener("input", (e) => {
     state.studySearchQuery = e.target.value;
     state.studyActiveCardIdx = 0; // reset to first matching card
     renderStudySession();
   });
 
   // Toggle Flashcard / QA List view in study session
-  document.getElementById("btn-toggle-flashcards").addEventListener("click", () => {
+  document.getElementById("btn-session-toggle-flashcards").addEventListener("click", () => {
     state.studyViewMode = "flashcard";
-    document.getElementById("btn-toggle-flashcards").classList.add("active");
-    document.getElementById("btn-toggle-qalist").classList.remove("active");
+    document.getElementById("btn-session-toggle-flashcards").classList.add("active");
+    document.getElementById("btn-session-toggle-qalist").classList.remove("active");
     renderStudySession();
   });
 
-  document.getElementById("btn-toggle-qalist").addEventListener("click", () => {
+  document.getElementById("btn-session-toggle-qalist").addEventListener("click", () => {
     state.studyViewMode = "qalist";
-    document.getElementById("btn-toggle-qalist").classList.add("active");
-    document.getElementById("btn-toggle-flashcards").classList.remove("active");
+    document.getElementById("btn-session-toggle-qalist").classList.add("active");
+    document.getElementById("btn-session-toggle-flashcards").classList.remove("active");
     renderStudySession();
   });
 
   // 3D Card Flip action
-  const flipCard = document.getElementById("study-flip-card");
+  const flipCard = document.getElementById("study-session-flip-card");
   flipCard.addEventListener("click", (e) => {
-    // Don't flip card if clicking inside answer scroll (scrollbar, coding textareas, code solution wrappers, buttons)
-    if (flipCard.classList.contains("flipped") && e.target.closest("#flashcard-answer-container")) {
+    // Don't flip card if clicking inside answer scroll (scrollbar, buttons)
+    if (flipCard.classList.contains("flipped") && e.target.closest("#session-flashcard-answer-container")) {
       return;
     }
     flipCard.classList.toggle("flipped");
   });
 
-  // Reveal coding solution button
-  document.getElementById("study-reveal-code-btn").addEventListener("click", (e) => {
-    e.stopPropagation(); // prevent card flip
-    const wrapper = document.getElementById("study-code-solution-wrapper");
-    const btn = document.getElementById("study-reveal-code-btn");
-    if (wrapper.style.display === "none") {
-      wrapper.style.display = "block";
-      btn.textContent = "Hide Solution Code";
+  // Reveal study coding solution button (collapsible drawer)
+  const studySolDrawer = document.getElementById("study-session-solution-drawer");
+  const studySolToggle = document.getElementById("study-session-toggle-solution");
+  const studySolToggleText = document.getElementById("study-session-toggle-text");
+
+  studySolToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const isOpen = studySolDrawer.classList.contains("open");
+    if (isOpen) {
+      studySolDrawer.classList.remove("open");
+      studySolDrawer.style.maxHeight = null;
+      studySolToggleText.textContent = "Show Solution";
     } else {
-      wrapper.style.display = "none";
-      btn.textContent = "Show Solution Code";
+      studySolDrawer.classList.add("open");
+      studySolDrawer.style.maxHeight = studySolDrawer.scrollHeight + "px";
+      studySolToggleText.textContent = "Hide Solution";
     }
   });
 
   // Navigation Controls (Prev/Next card)
-  document.getElementById("study-prev-card-btn").addEventListener("click", (e) => {
+  document.getElementById("study-session-prev-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     if (state.studyActiveCardIdx > 0) {
       state.studyActiveCardIdx--;
@@ -1043,7 +1063,7 @@ function setupEventListeners() {
     }
   });
 
-  document.getElementById("study-next-card-btn").addEventListener("click", (e) => {
+  document.getElementById("study-session-next-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     const items = getFilteredStudyItems();
     if (state.studyActiveCardIdx < items.length - 1) {
@@ -1052,8 +1072,8 @@ function setupEventListeners() {
     }
   });
 
-  // Mark as Mastered button inside study modal
-  document.getElementById("study-toggle-mastered-btn").addEventListener("click", (e) => {
+  // Mark as Mastered button inside study session
+  document.getElementById("study-session-mastered-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     const items = getFilteredStudyItems();
     const currentIdx = state.studyActiveCardIdx;
@@ -1080,17 +1100,16 @@ function setupEventListeners() {
     }
   });
 
-  // Modal Close Button
-  document.getElementById("study-modal-close-btn").addEventListener("click", () => {
-    document.getElementById("study-modal").classList.remove("active");
+  // Study Session Back Button
+  document.getElementById("study-session-back-btn").addEventListener("click", () => {
     state.studyActiveStep = null;
     saveState();
-    renderStudyHub();
+    switchToView("study-hub");
   });
 
-  // Study modal code editor draft listener
-  const studyEditor = document.getElementById("study-user-editor");
-  studyEditor.addEventListener("input", () => {
+  // Study session code editor draft listener
+  const studyEditor = document.getElementById("study-session-user-editor");
+  studyEditor.addEventListener("input", (e) => {
     const step = state.studyActiveStep;
     const items = getFilteredStudyItems();
     const currentIdx = state.studyActiveCardIdx;
@@ -1098,9 +1117,39 @@ function setupEventListeners() {
       const item = items[currentIdx];
       const originalIndex = step.items.indexOf(item);
       const draftKey = `study_${step.rel_path}_${originalIndex}`;
-      state.drafts[draftKey] = studyEditor.value;
+      state.drafts[draftKey] = e.target.value;
       saveState();
     }
+  });
+
+  // Practice Mode Tabs Event Listeners
+  document.getElementById("btn-info-input").addEventListener("click", () => {
+    document.getElementById("btn-info-input").classList.add("active");
+    document.getElementById("btn-info-output").classList.remove("active");
+    document.getElementById("practice-input-wrapper").style.display = "block";
+    document.getElementById("practice-output-wrapper").style.display = "none";
+  });
+
+  document.getElementById("btn-info-output").addEventListener("click", () => {
+    document.getElementById("btn-info-output").classList.add("active");
+    document.getElementById("btn-info-input").classList.remove("active");
+    document.getElementById("practice-input-wrapper").style.display = "none";
+    document.getElementById("practice-output-wrapper").style.display = "block";
+  });
+
+  // Study Session Coding Workspace Tabs Event Listeners
+  document.getElementById("btn-study-info-input").addEventListener("click", () => {
+    document.getElementById("btn-study-info-input").classList.add("active");
+    document.getElementById("btn-study-info-output").classList.remove("active");
+    document.getElementById("study-input-wrapper").style.display = "block";
+    document.getElementById("study-output-wrapper").style.display = "none";
+  });
+
+  document.getElementById("btn-study-info-output").addEventListener("click", () => {
+    document.getElementById("btn-study-info-output").classList.add("active");
+    document.getElementById("btn-study-info-input").classList.remove("active");
+    document.getElementById("study-input-wrapper").style.display = "none";
+    document.getElementById("study-output-wrapper").style.display = "block";
   });
 }
 
@@ -1351,14 +1400,13 @@ function openStudySession(step) {
   state.studySearchQuery = "";
   state.studyViewMode = "flashcard";
   
-  const searchInput = document.getElementById("study-modal-search");
+  const searchInput = document.getElementById("study-session-search");
   if (searchInput) searchInput.value = "";
   
-  document.getElementById("btn-toggle-flashcards").classList.add("active");
-  document.getElementById("btn-toggle-qalist").classList.remove("active");
+  document.getElementById("btn-session-toggle-flashcards").classList.add("active");
+  document.getElementById("btn-session-toggle-qalist").classList.remove("active");
   
-  document.getElementById("study-modal").classList.add("active");
-  renderStudySession();
+  switchToView("study-session");
 }
 
 function getFilteredStudyItems() {
@@ -1387,70 +1435,102 @@ function renderStudySession() {
   const currentIdx = state.studyActiveCardIdx;
 
   // Header step info
-  document.getElementById("study-modal-step-title").textContent = step.title;
+  document.getElementById("study-session-step-title").textContent = step.title;
+  
+  // Step tag/badge
+  const stepTag = document.getElementById("study-session-step-tag");
+  if (stepTag) {
+    const activeMod = materialsData[state.studyActiveModule];
+    const originalStepIdx = activeMod.steps.indexOf(step);
+    stepTag.textContent = `Step ${originalStepIdx + 1}`;
+  }
   
   // Progress Bar & Stats
   const progressText = total > 0 ? `${currentIdx + 1} / ${total}` : "0 / 0";
   const progressPercent = total > 0 ? ((currentIdx + 1) / total) * 100 : 0;
-  document.getElementById("study-modal-progress-text").textContent = progressText;
-  document.getElementById("study-modal-progress-fill").style.width = `${progressPercent}%`;
+  document.getElementById("study-session-progress-text").textContent = progressText;
+  document.getElementById("study-session-progress-fill").style.width = `${progressPercent}%`;
 
   if (state.studyViewMode === "flashcard") {
-    document.getElementById("study-flashcard-view").style.display = "flex";
-    document.getElementById("study-qalist-view").style.display = "none";
+    document.getElementById("study-session-flashcard-view").style.display = "flex";
+    document.getElementById("study-session-qalist-view").style.display = "none";
     
-    const card = document.getElementById("study-flip-card");
-    card.classList.remove("flipped"); // Always show question side first
+    // Always hide solution drawer by default in flashcard mode
+    const studySolDrawer = document.getElementById("study-session-solution-drawer");
+    if (studySolDrawer) {
+      studySolDrawer.classList.remove("open");
+      studySolDrawer.style.maxHeight = null;
+      document.getElementById("study-session-toggle-text").textContent = "Show Solution";
+    }
 
     if (total === 0) {
-      document.getElementById("flashcard-question").textContent = "No questions found matching search criteria.";
-      document.getElementById("flashcard-answer").textContent = "";
-      document.getElementById("flashcard-coding-area").style.display = "none";
-      document.getElementById("study-prev-card-btn").disabled = true;
-      document.getElementById("study-next-card-btn").disabled = true;
-      document.getElementById("study-toggle-mastered-btn").disabled = true;
+      document.getElementById("session-flashcard-question").textContent = "No questions found matching search criteria.";
+      document.getElementById("session-flashcard-answer").textContent = "";
+      document.getElementById("study-session-flip-card").style.display = "block";
+      document.getElementById("study-session-coding-workspace").style.display = "none";
+      document.getElementById("study-session-prev-btn").disabled = true;
+      document.getElementById("study-session-next-btn").disabled = true;
+      document.getElementById("study-session-mastered-btn").disabled = true;
       return;
     }
 
-    document.getElementById("study-prev-card-btn").disabled = (currentIdx === 0);
-    document.getElementById("study-next-card-btn").disabled = (currentIdx === total - 1);
-    document.getElementById("study-toggle-mastered-btn").disabled = false;
+    document.getElementById("study-session-prev-btn").disabled = (currentIdx === 0);
+    document.getElementById("study-session-next-btn").disabled = (currentIdx === total - 1);
+    document.getElementById("study-session-mastered-btn").disabled = false;
 
     const item = items[currentIdx];
     const originalIndex = step.items.indexOf(item);
     
-    // Front side (Question / Problem title)
-    document.getElementById("flashcard-question").textContent = item.q || item.title || item.problem;
-
-    // Back side (Answer / Explanation)
-    document.getElementById("flashcard-answer").textContent = item.a || item.problem || "";
-    
-    // Coding task elements
-    const codingArea = document.getElementById("flashcard-coding-area");
     if (step.type === "coding") {
-      codingArea.style.display = "block";
+      // Hide standard QA flip card
+      document.getElementById("study-session-flip-card").style.display = "none";
+      // Show split IDE workspace
+      document.getElementById("study-session-coding-workspace").style.display = "block";
       
-      const codeBlock = document.getElementById("study-code-solution");
-      codeBlock.innerHTML = highlightJavaCode(item.solution || "");
+      // Populate fields
+      document.getElementById("study-session-coding-title").textContent = item.title || "Coding Challenge";
       
-      document.getElementById("study-code-explanation").textContent = item.explanation || "";
+      // Reset tab selection to Input Setup
+      document.getElementById("btn-study-info-input").classList.add("active");
+      document.getElementById("btn-study-info-output").classList.remove("active");
+      document.getElementById("study-input-wrapper").style.display = "block";
+      document.getElementById("study-output-wrapper").style.display = "none";
+
+      // Setup inputs & expected output
+      document.getElementById("study-session-coding-input").innerHTML = highlightJavaCode(item.problem || "");
+      document.getElementById("study-session-coding-output").innerHTML = highlightJavaCode("// Expected Output:\n" + (item.expectedOutput || "// Refer to solution code for details."));
       
-      // Hide solution by default
-      document.getElementById("study-code-solution-wrapper").style.display = "none";
-      document.getElementById("study-reveal-code-btn").textContent = "Show Solution Code";
+      // Setup explanation
+      document.getElementById("study-session-code-explanation").textContent = item.explanation || "";
       
-      // Restore draft
+      // Setup solution
+      document.getElementById("study-session-code-solution").innerHTML = highlightJavaCode(item.solution || "");
+      
+      // Restore draft code
       const draftKey = `study_${step.rel_path}_${originalIndex}`;
-      document.getElementById("study-user-editor").value = state.drafts[draftKey] || "";
+      document.getElementById("study-session-user-editor").value = state.drafts[draftKey] || "";
     } else {
-      codingArea.style.display = "none";
+      // Show standard QA flip card
+      document.getElementById("study-session-flip-card").style.display = "block";
+      // Hide split IDE workspace
+      document.getElementById("study-session-coding-workspace").style.display = "none";
+      
+      // Reset card flip to front side
+      const flipCard = document.getElementById("study-session-flip-card");
+      flipCard.classList.remove("flipped");
+
+      // Front side (Question / Problem title)
+      document.getElementById("session-flashcard-question").textContent = item.q || item.title || item.problem;
+
+      // Back side (Answer / Explanation)
+      document.getElementById("session-flashcard-answer").textContent = item.a || "";
     }
 
     // Mastered button styling
     const mastered = state.studyMastered[step.rel_path] || [];
     const isMastered = mastered.includes(originalIndex);
-    const masteredBtn = document.getElementById("study-toggle-mastered-btn");
-    const masteredText = document.getElementById("study-mastered-btn-text");
+    const masteredBtn = document.getElementById("study-session-mastered-btn");
+    const masteredText = document.getElementById("study-session-mastered-text");
 
     if (isMastered) {
       masteredText.textContent = "Mastered";
@@ -1461,8 +1541,8 @@ function renderStudySession() {
     }
   } else {
     // QA List View
-    document.getElementById("study-flashcard-view").style.display = "none";
-    const qalistContainer = document.getElementById("study-qalist-view");
+    document.getElementById("study-session-flashcard-view").style.display = "none";
+    const qalistContainer = document.getElementById("study-session-qalist-view");
     qalistContainer.style.display = "flex";
     qalistContainer.innerHTML = "";
 
@@ -1483,7 +1563,7 @@ function renderStudySession() {
         <div class="qalist-question-row" id="qalist-row-${originalIndex}">
           <div class="qalist-meta">
             ${isMastered ? '<span class="qalist-mastered-badge">Mastered</span>' : ''}
-            <span>${item.q || item.title}</span>
+            <span>${item.q || item.title || item.problem}</span>
           </div>
           <svg class="qalist-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
         </div>

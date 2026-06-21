@@ -1990,57 +1990,95 @@ body {
 }
 
 /* ==========================================================================
-   STUDY SESSION OVERLAY MODAL
+   STUDY SESSION FULL-PAGE WORKSPACE
    ========================================================================== */
-.study-modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background-color: rgba(8, 11, 17, 0.6);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  z-index: 1000;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
+#view-study-session {
+  max-width: 1200px;
+  margin: 0 auto;
 }
 
-.study-modal-overlay.active {
-  display: flex;
-}
-
-.study-modal-card {
-  width: 100%;
-  max-width: 800px;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  padding: 28px;
-  gap: 20px;
-  box-shadow: var(--shadow-lg);
-  animation: scaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-}
-
-@keyframes scaleUp {
-  from {
-    transform: scale(0.96);
-    opacity: 0;
-  }
-  to {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-.study-modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.study-session-header {
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 16px;
+}
+
+/* Practice & Study Tabs Styling */
+.practice-tabs-container {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-panel);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.practice-info-tabs {
+  display: flex;
+  background-color: var(--bg-input);
+  border-bottom: 1px solid var(--border-color);
+  padding: 4px 4px 0 4px;
+  gap: 4px;
+}
+
+.info-tab {
+  background: none;
+  border: none;
+  padding: 10px 20px;
+  font-family: var(--font-ui);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border-bottom: 2px solid transparent;
+  transition: all var(--transition-fast);
+}
+
+.info-tab:hover {
+  color: var(--text-main);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.info-tab.active {
+  color: var(--accent-primary);
+  background-color: var(--bg-panel);
+  border-bottom-color: var(--accent-primary);
+}
+
+[data-theme="light"] .info-tab:hover {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+.practice-info-content {
+  padding: 0;
+}
+
+/* Split IDE Workspace for Study Coding Steps */
+.study-coding-workspace {
+  margin-top: 12px;
+  width: 100%;
+}
+
+.study-coding-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: stretch;
+}
+
+.study-coding-left, .study-coding-right {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 420px;
+}
+
+@media (max-width: 900px) {
+  .study-coding-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .study-modal-title-area {
@@ -2283,9 +2321,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: 480px;
-  overflow-y: auto;
-  padding-right: 6px;
+  width: 100%;
 }
 
 .qalist-item {
@@ -2304,7 +2340,7 @@ body {
   padding: 16px 20px;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start; /* align items to start for wrapping support */
   cursor: pointer;
   font-weight: 700;
   font-size: 0.95rem;
@@ -2319,8 +2355,15 @@ body {
 
 .qalist-meta {
   display: flex;
-  align-items: center;
+  align-items: flex-start; /* align chevron and mastered tag at start */
   gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.qalist-meta span:last-child {
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .qalist-chevron {
