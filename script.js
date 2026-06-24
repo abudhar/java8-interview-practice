@@ -145,7 +145,7 @@ function saveActiveWidgetDraft() {
 
 // Executes code via the onlinecompiler.io REST API through a CORS proxy (Cloudflare Worker)
 // → Deploy cloudflare-worker/worker.js to Cloudflare, then paste your worker URL below
-const PROXY_URL = "https://compiler-proxy.abudhar.workers.dev"; // ← update after deploy
+const PROXY_URL = "https://wandering-pine-c536.abudhar15.workers.dev";
 
 async function runCodeWithPiston(language, code) {
   // Compiler IDs from https://api.onlinecompiler.io/api/compilers/
