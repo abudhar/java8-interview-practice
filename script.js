@@ -147,6 +147,31 @@ function saveActiveWidgetDraft() {
 // → Deploy cloudflare-worker/worker.js to Cloudflare, then paste your worker URL below
 const PROXY_URL = "https://wandering-pine-c536.abudhar15.workers.dev";
 
+// If a Java snippet has no class declaration, wrap it in a runnable boilerplate
+// so users can type just the stream/lambda expression and hit Run immediately
+function wrapJavaCode(code) {
+  // Already a complete program — leave it alone
+  if (/\bclass\s+\w+/.test(code)) return code;
+
+  // Indent the snippet by 8 spaces inside main()
+  const indented = code
+    .split("\n")
+    .map(line => "        " + line)
+    .join("\n");
+
+  return `import java.util.*;
+import java.util.stream.*;
+import java.util.function.*;
+import java.util.Optional;
+import java.util.Map;
+
+public class Main {
+    public static void main(String[] args) {
+${indented}
+    }
+}`;
+}
+
 async function runCodeWithPiston(language, code) {
   // Compiler IDs from https://api.onlinecompiler.io/api/compilers/
   const compilerMap = {
@@ -159,11 +184,14 @@ async function runCodeWithPiston(language, code) {
   };
   const compiler = compilerMap[language] || "openjdk-25";
 
+  // Auto-wrap Java snippets into a full runnable program
+  const finalCode = (language === "java") ? wrapJavaCode(code) : code;
+
   // Call the CORS proxy worker — it forwards to api.onlinecompiler.io with the API key
   const response = await fetch(PROXY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ compiler, code, input: "" }),
+    body: JSON.stringify({ compiler, code: finalCode, input: "" }),
   });
 
   if (!response.ok) {
@@ -175,6 +203,7 @@ async function runCodeWithPiston(language, code) {
   if (data.error && data.error.trim()) return data.error;
   return (data.output && data.output.trim()) ? data.output : "(no output)";
 }
+
 
 
 // Builds and injects a custom inline code editor that calls the onlinecompiler.io API
