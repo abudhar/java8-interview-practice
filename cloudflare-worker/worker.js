@@ -4,11 +4,15 @@
  * Deploy steps:
  *  1. Go to https://dash.cloudflare.com → Workers & Pages → Create Worker
  *  2. Paste this entire file into the editor, click "Deploy"
- *  3. Copy your worker URL (e.g. https://compiler-proxy.yourname.workers.dev)
- *  4. In script.js, set PROXY_URL to that URL
+ *  3. In the Worker's dashboard, go to Settings → Variables → Add Variable:
+ *     - Name: API_KEY
+ *     - Type: Secret
+ *     - Value: [Paste your onlinecompiler.io API key here]
+ *     - Click "Save and deploy"
+ *  4. Copy your worker URL (e.g. https://compiler-proxy.yourname.workers.dev)
+ *  5. In script.js, set PROXY_URL to that URL
  */
 
-const API_KEY      = "d643e748b751a444224385959c431c35";
 const UPSTREAM_URL = "https://api.onlinecompiler.io/api/run-code-sync/";
 
 const CORS_HEADERS = {
@@ -18,7 +22,7 @@ const CORS_HEADERS = {
 };
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     // Handle CORS preflight
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -38,12 +42,20 @@ export default {
       });
     }
 
+    const apiKey = env.API_KEY;
+    if (!apiKey) {
+      return new Response(JSON.stringify({ error: "API_KEY secret is not configured in Cloudflare Worker settings" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+      });
+    }
+
     // Forward to onlinecompiler.io — API key stays server-side (not in browser)
     const upstream = await fetch(UPSTREAM_URL, {
       method:  "POST",
       headers: {
         "Content-Type":  "application/json",
-        "Authorization": API_KEY,
+        "Authorization": apiKey,
       },
       body: JSON.stringify(body),
     });
