@@ -143,7 +143,10 @@ function saveActiveWidgetDraft() {
   saveState();
 }
 
-// Executes code via the onlinecompiler.io REST API
+// Executes code via the onlinecompiler.io REST API through a CORS proxy (Cloudflare Worker)
+// → Deploy cloudflare-worker/worker.js to Cloudflare, then paste your worker URL below
+const PROXY_URL = "https://compiler-proxy.abudhar.workers.dev"; // ← update after deploy
+
 async function runCodeWithPiston(language, code) {
   // Compiler IDs from https://api.onlinecompiler.io/api/compilers/
   const compilerMap = {
@@ -156,12 +159,10 @@ async function runCodeWithPiston(language, code) {
   };
   const compiler = compilerMap[language] || "openjdk-25";
 
-  const response = await fetch("https://api.onlinecompiler.io/api/run-code-sync/", {
+  // Call the CORS proxy worker — it forwards to api.onlinecompiler.io with the API key
+  const response = await fetch(PROXY_URL, {
     method: "POST",
-    headers: {
-      "Content-Type":  "application/json",
-      "Authorization": "d643e748b751a444224385959c431c35",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ compiler, code, input: "" }),
   });
 
@@ -174,6 +175,7 @@ async function runCodeWithPiston(language, code) {
   if (data.error && data.error.trim()) return data.error;
   return (data.output && data.output.trim()) ? data.output : "(no output)";
 }
+
 
 // Builds and injects a custom inline code editor that calls the onlinecompiler.io API
 function loadCompilerWidget(containerId, widgetId, draftKey, defaultCode) {
