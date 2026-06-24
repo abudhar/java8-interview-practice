@@ -117,6 +117,93 @@ function highlightJavaCode(code) {
   return html;
 }
 
+// Save the current code draft from the active compiler widget(s) to state.drafts
+function saveActiveWidgetDraft() {
+  // 1. Practice Mode compiler widget
+  const practiceWidget = document.getElementById("practice-compiler-widget");
+  if (practiceWidget && practiceWidget.shadowRoot) {
+    const contentEl = practiceWidget.shadowRoot.querySelector(".cm-content");
+    if (contentEl) {
+      state.drafts[state.currentId] = contentEl.innerText || contentEl.textContent;
+    }
+  }
+
+  // 2. Study Mode compiler widget
+  if (state.studyActiveStep) {
+    const studyWidget = document.getElementById("study-session-compiler-widget");
+    if (studyWidget && studyWidget.shadowRoot) {
+      const contentEl = studyWidget.shadowRoot.querySelector(".cm-content");
+      if (contentEl) {
+        const items = getFilteredStudyItems();
+        const currentIdx = state.studyActiveCardIdx;
+        if (items.length > 0 && currentIdx < items.length) {
+          const item = items[currentIdx];
+          const originalIndex = state.studyActiveStep.items.indexOf(item);
+          const draftKey = `study_${state.studyActiveStep.rel_path}_${originalIndex}`;
+          state.drafts[draftKey] = contentEl.innerText || contentEl.textContent;
+        }
+      }
+    }
+  }
+
+  saveState();
+}
+
+// Dynamically loads the online compiler widget into a container
+function loadCompilerWidget(containerId, widgetId, draftKey, defaultCode) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  // Clear container
+  container.innerHTML = "";
+
+  // Get the initial code (either user draft or default question setup code)
+  const initialCode = state.drafts[draftKey] || defaultCode || "";
+
+  // Create the widget div element
+  const widgetDiv = document.createElement("div");
+  widgetDiv.className = "runcode";
+  widgetDiv.id = widgetId;
+  // Select the appropriate widget key based on environment (local vs production)
+  const widgetKey = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    ? "231b44df738678876a999db7ad51985c" // Localhost key (bound to port 8080)
+    : "5315adfb38c9d8f02b67196df3d9a6bd"; // Production key (bound to github.io)
+
+  widgetDiv.setAttribute("data-key", widgetKey);
+  widgetDiv.setAttribute("data-lang", "java");
+  widgetDiv.setAttribute("data-theme", state.theme === "dark" ? "dark" : "light");
+  widgetDiv.setAttribute("data-height", "450");
+  widgetDiv.setAttribute("data-code", initialCode);
+
+  // Append to container
+  container.appendChild(widgetDiv);
+
+  // Dynamically load/re-execute the widget script to initialize the CodeMirror editor
+  const scriptId = "online-compiler-widget-script";
+  let script = document.getElementById(scriptId);
+  if (script) {
+    script.remove(); // Remove old script tag to force browser to reload and re-execute
+  }
+
+  script = document.createElement("script");
+  script.id = scriptId;
+  // Use a cache-buster query parameter to force browser to run it on the newly added DOM element
+  script.src = "https://onlinecompiler.io/widget.js?t=" + Date.now();
+  script.async = true;
+  document.body.appendChild(script);
+
+  // Listen for input events on the widget element (composed events bubble up from Shadow DOM)
+  widgetDiv.addEventListener("input", () => {
+    if (widgetDiv.shadowRoot) {
+      const contentEl = widgetDiv.shadowRoot.querySelector(".cm-content");
+      if (contentEl) {
+        state.drafts[draftKey] = contentEl.innerText || contentEl.textContent;
+        saveState();
+      }
+    }
+  });
+}
+
 // Reusable Toast Alerts
 function showToast(message, type = "success") {
   const toast = document.getElementById("custom-alert-toast");
@@ -214,6 +301,9 @@ window.addEventListener("resize", () => {
 
 // View Switching Manager
 function switchToView(viewName) {
+  // Save any active widget drafts before switching views
+  saveActiveWidgetDraft();
+
   // Hide all panels
   document.querySelectorAll(".view-panel").forEach(panel => {
     panel.classList.remove("active");
@@ -533,9 +623,13 @@ function renderPracticeQuestion() {
     outputBlock.textContent = q.expectedOutput || "// No expected output specified";
   }
 
-  // Show user drafts/saved text area code
-  const textarea = document.getElementById("practice-user-editor");
-  textarea.value = state.drafts[q.id] || "";
+  // Load interactive compiler widget
+  loadCompilerWidget(
+    "compiler-widget-container",
+    "practice-compiler-widget",
+    q.id,
+    q.input
+  );
 
   // Hide Java Code block initially
   const drawer = document.getElementById("practice-solution-drawer");
@@ -753,9 +847,20 @@ function setupEventListeners() {
 
   // Light/Dark Toggle click
   document.getElementById("theme-toggle").addEventListener("click", () => {
+    // Save draft before re-rendering
+    saveActiveWidgetDraft();
+    
     state.theme = state.theme === "dark" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", state.theme);
     saveState();
+
+    // Re-render active widget to apply theme immediately
+    if (document.getElementById("view-practice").classList.contains("active")) {
+      renderPracticeQuestion();
+    }
+    if (state.studyActiveStep && document.getElementById("view-study-session").classList.contains("active")) {
+      renderStudySession();
+    }
   });
 
   // Search input events
@@ -813,6 +918,7 @@ function setupEventListeners() {
   // Prev / Next Question Actions
   document.getElementById("practice-prev-btn").addEventListener("click", () => {
     if (state.currentId > 1) {
+      saveActiveWidgetDraft();
       state.currentId--;
       saveState();
       renderPracticeQuestion();
@@ -821,6 +927,7 @@ function setupEventListeners() {
 
   document.getElementById("practice-next-btn").addEventListener("click", () => {
     if (state.currentId < questions.length) {
+      saveActiveWidgetDraft();
       state.currentId++;
       saveState();
       renderPracticeQuestion();
@@ -829,6 +936,7 @@ function setupEventListeners() {
 
   // Random practice btn
   document.getElementById("practice-random-btn").addEventListener("click", () => {
+    saveActiveWidgetDraft();
     state.currentId = getRandomQuestionId();
     saveState();
     renderPracticeQuestion();
@@ -876,12 +984,7 @@ function setupEventListeners() {
     saveState();
   });
 
-  // User Code Editor draft save
-  const editorArea = document.getElementById("practice-user-editor");
-  editorArea.addEventListener("input", (e) => {
-    state.drafts[state.currentId] = e.target.value;
-    saveState();
-  });
+  // Practice Mode draft auto-save is now handled inside loadCompilerWidget's event listener
 
   // Show/Hide Solution toggle drawer action
   const solDrawer = document.getElementById("practice-solution-drawer");
@@ -1058,6 +1161,7 @@ function setupEventListeners() {
   document.getElementById("study-session-prev-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     if (state.studyActiveCardIdx > 0) {
+      saveActiveWidgetDraft();
       state.studyActiveCardIdx--;
       renderStudySession();
     }
@@ -1067,6 +1171,7 @@ function setupEventListeners() {
     e.stopPropagation();
     const items = getFilteredStudyItems();
     if (state.studyActiveCardIdx < items.length - 1) {
+      saveActiveWidgetDraft();
       state.studyActiveCardIdx++;
       renderStudySession();
     }
@@ -1107,20 +1212,7 @@ function setupEventListeners() {
     switchToView("study-hub");
   });
 
-  // Study session code editor draft listener
-  const studyEditor = document.getElementById("study-session-user-editor");
-  studyEditor.addEventListener("input", (e) => {
-    const step = state.studyActiveStep;
-    const items = getFilteredStudyItems();
-    const currentIdx = state.studyActiveCardIdx;
-    if (step && items.length > 0 && currentIdx < items.length) {
-      const item = items[currentIdx];
-      const originalIndex = step.items.indexOf(item);
-      const draftKey = `study_${step.rel_path}_${originalIndex}`;
-      state.drafts[draftKey] = e.target.value;
-      saveState();
-    }
-  });
+  // Study Mode draft auto-save is now handled inside loadCompilerWidget's event listener
 
   // Practice Mode Tabs Event Listeners
   document.getElementById("btn-info-input").addEventListener("click", () => {
@@ -1187,6 +1279,7 @@ function handleKeyboardShortcuts(e) {
   if (e.key === "ArrowRight") {
     // Next Question
     if (state.currentId < questions.length) {
+      saveActiveWidgetDraft();
       state.currentId++;
       saveState();
       if (document.getElementById("view-practice").classList.contains("active")) {
@@ -1199,6 +1292,7 @@ function handleKeyboardShortcuts(e) {
   } else if (e.key === "ArrowLeft") {
     // Previous Question
     if (state.currentId > 1) {
+      saveActiveWidgetDraft();
       state.currentId--;
       saveState();
       if (document.getElementById("view-practice").classList.contains("active")) {
@@ -1210,6 +1304,7 @@ function handleKeyboardShortcuts(e) {
     }
   } else if (key === "r") {
     // Random Question
+    saveActiveWidgetDraft();
     state.currentId = getRandomQuestionId();
     saveState();
     if (document.getElementById("view-practice").classList.contains("active")) {
@@ -1506,9 +1601,14 @@ function renderStudySession() {
       // Setup solution
       document.getElementById("study-session-code-solution").innerHTML = highlightJavaCode(item.solution || "");
       
-      // Restore draft code
+      // Restore draft code and load compiler widget
       const draftKey = `study_${step.rel_path}_${originalIndex}`;
-      document.getElementById("study-session-user-editor").value = state.drafts[draftKey] || "";
+      loadCompilerWidget(
+        "study-compiler-widget-container",
+        "study-session-compiler-widget",
+        draftKey,
+        item.problem
+      );
     } else {
       // Show standard QA flip card
       document.getElementById("study-session-flip-card").style.display = "block";

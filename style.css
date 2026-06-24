@@ -2419,3 +2419,29 @@ body {
   border-radius: 4px;
 }
 
+/* ==========================================================================
+   ONLINE COMPILER WIDGET CUSTOMIZATION
+   ========================================================================== */
+.runcode {
+  margin-top: 12px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  font-family: var(--font-ui) !important;
+  --oc-mono: var(--font-code) !important;
+  --oc-accent: var(--accent-primary) !important;
+  --oc-accent-hover: var(--accent-primary-hover) !important;
+  --oc-bg: var(--bg-panel) !important;
+  --oc-surface: var(--bg-app) !important;
+  --oc-border: var(--border-color) !important;
+  --oc-text: var(--text-main) !important;
+  --oc-text-muted: var(--text-muted) !important;
+  --oc-success: var(--accent-success) !important;
+  --oc-error: var(--accent-error) !important;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition-fast);
+}
+
+.runcode:focus-within {
+  box-shadow: var(--shadow-md), 0 0 0 4px var(--accent-primary-glow);
+}
+
