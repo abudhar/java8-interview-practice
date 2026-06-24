@@ -2511,26 +2511,13 @@ body {
 .cc-run-btn:active:not(:disabled) { transform: translateY(0); }
 .cc-run-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 
-/* Code textarea */
+/* Monaco Editor host */
 .cc-body { position: relative; }
-.cc-textarea {
+.cc-monaco-host {
+  height: 320px;
   width: 100%;
-  min-height: 300px;
-  max-height: 500px;
-  resize: vertical;
-  padding: 16px;
-  background: var(--bg-panel);
-  color: var(--text-main);
-  border: none;
-  outline: none;
-  font-family: var(--font-code);
-  font-size: 13.5px;
-  line-height: 1.7;
-  tab-size: 4;
-  box-sizing: border-box;
-  display: block;
 }
-.cc-textarea::placeholder { color: var(--text-muted); }
+
 
 /* Output section */
 .cc-output-section {

@@ -117,29 +117,12 @@ function highlightJavaCode(code) {
   return html;
 }
 
-// Save the current code draft from the active custom editor(s) to state.drafts
+// Save the current code draft from the active Monaco editor(s) to state.drafts
+// Monaco auto-saves via onDidChangeModelContent, so state.drafts is always current.
+// This function is kept for compatibility with nav-away triggers.
 function saveActiveWidgetDraft() {
-  // 1. Practice Mode editor
-  const practiceTextarea = document.getElementById("practice-compiler-widget-code");
-  if (practiceTextarea) {
-    state.drafts[state.currentId] = practiceTextarea.value;
-  }
-
-  // 2. Study Mode editor
-  if (state.studyActiveStep) {
-    const studyTextarea = document.getElementById("study-session-compiler-widget-code");
-    if (studyTextarea) {
-      const items = getFilteredStudyItems();
-      const currentIdx = state.studyActiveCardIdx;
-      if (items.length > 0 && currentIdx < items.length) {
-        const item = items[currentIdx];
-        const originalIndex = state.studyActiveStep.items.indexOf(item);
-        const draftKey = `study_${state.studyActiveStep.rel_path}_${originalIndex}`;
-        state.drafts[draftKey] = studyTextarea.value;
-      }
-    }
-  }
-
+  // Drafts are continuously saved inside loadCompilerWidget's onDidChangeModelContent.
+  // Just persist whatever is already in state.drafts.
   saveState();
 }
 
@@ -206,17 +189,121 @@ async function runCodeWithPiston(language, code) {
 
 
 
-// Builds and injects a custom inline code editor that calls the onlinecompiler.io API
-function loadCompilerWidget(containerId, widgetId, draftKey, defaultCode) {
+// ── Monaco Editor integration ─────────────────────────────────────────────────
+// Loads Monaco from CDN once and calls back when ready
+let _monacoCallbacks = [];
+function ensureMonaco(cb) {
+  if (window.monaco) { cb(); return; }
+  _monacoCallbacks.push(cb);
+  if (_monacoCallbacks.length > 1) return; // already loading
+  const s = document.createElement("script");
+  s.src = "https://unpkg.com/monaco-editor@0.52.2/min/vs/loader.js";
+  s.onload = () => {
+    window.require.config({ paths: { vs: "https://unpkg.com/monaco-editor@0.52.2/min/vs" } });
+    window.require(["vs/editor/editor.main"], () => {
+      _registerJava8Completions();
+      _monacoCallbacks.forEach(f => f());
+      _monacoCallbacks = [];
+    });
+  };
+  document.head.appendChild(s);
+}
+
+// Registers Java 8 Stream API autocomplete suggestions in Monaco
+function _registerJava8Completions() {
+  monaco.languages.registerCompletionItemProvider("java", {
+    triggerCharacters: [".", " "],
+    provideCompletionItems: (model, position) => {
+      const word = model.getWordUntilPosition(position);
+      const range = {
+        startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
+        startColumn: word.startColumn,        endColumn: word.endColumn,
+      };
+      const mk = monaco.languages.CompletionItemKind;
+      const Rule = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;
+      const items = [
+        // Stream pipeline
+        ["stream()",                       "Create a stream from collection",             "stream()",                            mk.Method],
+        ["filter()",                        "Keep elements matching predicate",            "filter(${1:x -> x})",                 mk.Method],
+        ["map()",                           "Transform each element",                     "map(${1:x -> x})",                    mk.Method],
+        ["flatMap()",                       "Flatten nested streams",                     "flatMap(${1:x -> x.stream()})",       mk.Method],
+        ["mapToInt()",                      "Map to IntStream",                           "mapToInt(${1:Integer::intValue})",    mk.Method],
+        ["collect()",                       "Collect stream to collection",               "collect(${1:Collectors.toList()})",   mk.Method],
+        ["forEach()",                       "Iterate each element",                      "forEach(${1:System.out::println})",   mk.Method],
+        ["sorted()",                        "Sort elements (natural order)",              "sorted()",                            mk.Method],
+        ["sorted(Comparator)",              "Sort with comparator",                      "sorted(${1:Comparator.reverseOrder()})", mk.Method],
+        ["distinct()",                      "Remove duplicates",                         "distinct()",                          mk.Method],
+        ["limit()",                         "Limit stream to n elements",                "limit(${1:10})",                      mk.Method],
+        ["skip()",                          "Skip first n elements",                     "skip(${1:5})",                        mk.Method],
+        ["count()",                         "Count elements in stream",                  "count()",                             mk.Method],
+        ["findFirst()",                     "Return first element as Optional",          "findFirst()",                         mk.Method],
+        ["findAny()",                       "Return any element as Optional",            "findAny()",                           mk.Method],
+        ["reduce()",                        "Reduce stream to single value",             "reduce(${1:0}, ${2:Integer::sum})",   mk.Method],
+        ["anyMatch()",                      "True if any element matches",               "anyMatch(${1:x -> x})",               mk.Method],
+        ["allMatch()",                      "True if all elements match",                "allMatch(${1:x -> x})",               mk.Method],
+        ["noneMatch()",                     "True if no element matches",                "noneMatch(${1:x -> x})",              mk.Method],
+        ["min()",                           "Find minimum element",                      "min(${1:Comparator.naturalOrder()})", mk.Method],
+        ["max()",                           "Find maximum element",                      "max(${1:Comparator.naturalOrder()})", mk.Method],
+        ["peek()",                          "Peek at each element (debug)",              "peek(${1:System.out::println})",      mk.Method],
+        // Collectors
+        ["Collectors.toList()",             "Collect to ArrayList",                      "Collectors.toList()",                  mk.Class],
+        ["Collectors.toSet()",              "Collect to HashSet",                        "Collectors.toSet()",                   mk.Class],
+        ["Collectors.toUnmodifiableList()", "Collect to unmodifiable List",              "Collectors.toUnmodifiableList()",      mk.Class],
+        ["Collectors.joining()",            "Join strings with delimiter",               "Collectors.joining(\"${1:, }\")",     mk.Class],
+        ["Collectors.joining(d,p,s)",       "Join with delimiter, prefix, suffix",       "Collectors.joining(\"${1:,}\", \"${2:Prefix}\", \"${3:Suffix}\")", mk.Class],
+        ["Collectors.groupingBy()",         "Group elements by classifier",              "Collectors.groupingBy(${1:Function.identity()})", mk.Class],
+        ["Collectors.counting()",           "Count elements per group",                  "Collectors.counting()",                mk.Class],
+        ["Collectors.partitioningBy()",     "Partition into two groups (true/false)",   "Collectors.partitioningBy(${1:x -> x % 2 == 0})", mk.Class],
+        ["Collectors.toMap()",              "Collect to Map",                            "Collectors.toMap(${1:k -> k}, ${2:v -> v})", mk.Class],
+        ["Collectors.summarizingInt()",     "Get IntSummaryStatistics",                  "Collectors.summarizingInt(${1:Integer::intValue})", mk.Class],
+        // Method references
+        ["System.out::println",             "Print each element",                        "System.out::println",                  mk.Reference],
+        ["Integer::parseInt",               "Parse String to int",                       "Integer::parseInt",                    mk.Reference],
+        ["Integer::intValue",               "Unbox Integer to int",                      "Integer::intValue",                    mk.Reference],
+        ["String::valueOf",                 "Convert to String",                         "String::valueOf",                      mk.Reference],
+        ["String::toUpperCase",             "Map to uppercase",                          "String::toUpperCase",                  mk.Reference],
+        ["String::toLowerCase",             "Map to lowercase",                          "String::toLowerCase",                  mk.Reference],
+        ["String::length",                  "Get string length",                         "String::length",                       mk.Reference],
+        ["Function.identity()",             "Returns the input unchanged",               "Function.identity()",                  mk.Class],
+        ["Comparator.reverseOrder()",       "Reverse/descending comparator",             "Comparator.reverseOrder()",            mk.Class],
+        ["Comparator.naturalOrder()",       "Natural/ascending comparator",              "Comparator.naturalOrder()",            mk.Class],
+        ["Comparator.comparing()",          "Compare by key extractor",                  "Comparator.comparing(${1:x -> x})",   mk.Class],
+        // Optional
+        ["Optional.of()",                   "Wrap non-null value in Optional",           "Optional.of(${1:value})",              mk.Class],
+        ["Optional.empty()",                "Create empty Optional",                     "Optional.empty()",                     mk.Class],
+        ["Optional.ofNullable()",           "Wrap nullable value in Optional",           "Optional.ofNullable(${1:value})",      mk.Class],
+        // Helpers
+        ["Arrays.asList()",                 "Create fixed-size list",                    "Arrays.asList(${1})",                  mk.Class],
+        ["Collections.sort()",              "Sort a list in place",                      "Collections.sort(${1:list})",          mk.Class],
+        ["System.out.println()",            "Print line to console",                     "System.out.println(${1})",             mk.Function],
+      ];
+      return {
+        suggestions: items.map(([label, detail, insertText, kind]) => ({
+          label, kind, detail, insertText, range,
+          insertTextRules: Rule,
+        })),
+      };
+    },
+  });
+}
+
+// Builds and injects a Monaco-powered IDE into the given container
+function loadCompilerWidget(containerId, widgetId, draftKey, defaultCode, expectedOutput) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
   container.innerHTML = "";
 
   const initialCode = state.drafts[draftKey] || defaultCode || "";
-  const isDark = state.theme === "dark";
+  const isDark      = state.theme === "dark";
 
-  // ── Editor wrapper ──────────────────────────────────────────────────────────
+  // Monaco language IDs per compiler key
+  const monacoLangMap = {
+    java: "java", python: "python", javascript: "typescript",
+    cpp: "cpp",   go: "go",         rust: "rust",
+  };
+
+  // ── Wrapper HTML ─────────────────────────────────────────────────────────
   const wrapper = document.createElement("div");
   wrapper.className = "custom-compiler" + (isDark ? " dark" : "");
   wrapper.id = widgetId;
@@ -233,23 +320,15 @@ function loadCompilerWidget(containerId, widgetId, draftKey, defaultCode) {
       </select>
       <div class="cc-status" id="${widgetId}-status">
         <span class="cc-dot cc-dot--idle"></span>
-        <span class="cc-status-text">Ready</span>
+        <span class="cc-status-text">Loading editor\u2026</span>
       </div>
-      <button class="cc-run-btn" id="${widgetId}-run-btn">
+      <button class="cc-run-btn" id="${widgetId}-run-btn" disabled>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         Run
       </button>
     </div>
     <div class="cc-body">
-      <textarea
-        class="cc-textarea"
-        id="${widgetId}-code"
-        spellcheck="false"
-        autocomplete="off"
-        autocorrect="off"
-        autocapitalize="off"
-        placeholder="// Write your Java code here..."
-      >${initialCode.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</textarea>
+      <div id="${widgetId}-monaco" class="cc-monaco-host"></div>
     </div>
     <div class="cc-output-section" id="${widgetId}-output-section" style="display:none;">
       <div class="cc-output-header">
@@ -263,53 +342,108 @@ function loadCompilerWidget(containerId, widgetId, draftKey, defaultCode) {
   container.appendChild(wrapper);
 
   // ── Refs ─────────────────────────────────────────────────────────────────
-  const textarea      = document.getElementById(`${widgetId}-code`);
   const runBtn        = document.getElementById(`${widgetId}-run-btn`);
   const statusEl      = document.getElementById(`${widgetId}-status`);
   const outputSection = document.getElementById(`${widgetId}-output-section`);
   const outputEl      = document.getElementById(`${widgetId}-output`);
   const clearBtn      = document.getElementById(`${widgetId}-clear-btn`);
   const langSelect    = document.getElementById(`${widgetId}-lang`);
+  let   editorInst    = null;
 
-  // Tab key inserts spaces instead of leaving the field
-  textarea.addEventListener("keydown", (e) => {
-    if (e.key === "Tab") {
-      e.preventDefault();
-      const s = textarea.selectionStart;
-      const v = textarea.value;
-      textarea.value = v.substring(0, s) + "    " + v.substring(textarea.selectionEnd);
-      textarea.selectionStart = textarea.selectionEnd = s + 4;
-    }
+  // ── Load Monaco ──────────────────────────────────────────────────────────
+  ensureMonaco(() => {
+    const host = document.getElementById(`${widgetId}-monaco`);
+    if (!host) return;
+
+    editorInst = monaco.editor.create(host, {
+      value:                  initialCode,
+      language:               monacoLangMap[langSelect.value] || "java",
+      theme:                  isDark ? "vs-dark" : "vs",
+      fontSize:               13.5,
+      fontFamily:             "'JetBrains Mono', 'Fira Code', Consolas, monospace",
+      fontLigatures:          true,
+      lineNumbers:            "on",
+      minimap:                { enabled: false },
+      scrollBeyondLastLine:   false,
+      automaticLayout:        true,
+      tabSize:                4,
+      wordWrap:               "on",
+      padding:                { top: 14, bottom: 14 },
+      suggestOnTriggerCharacters: true,
+      quickSuggestions:       { other: true, comments: false, strings: false },
+      acceptSuggestionOnEnter: "on",
+      roundedSelection:       true,
+      cursorBlinking:         "smooth",
+      smoothScrolling:        true,
+      scrollbar:              { verticalScrollbarSize: 5, horizontalScrollbarSize: 5 },
+    });
+
+    // Auto-save draft on every change
+    editorInst.onDidChangeModelContent(() => {
+      state.drafts[draftKey] = editorInst.getValue();
+      saveState();
+    });
+
+    // Switch language when selector changes
+    langSelect.addEventListener("change", () => {
+      const lang = monacoLangMap[langSelect.value] || "java";
+      monaco.editor.setModelLanguage(editorInst.getModel(), lang);
+    });
+
+    // Enable run button now that editor is ready
+    runBtn.disabled = false;
+    setStatus(statusEl, "idle", "Ready");
   });
 
-  // Save draft on every keystroke
-  textarea.addEventListener("input", () => {
-    state.drafts[draftKey] = textarea.value;
-    saveState();
-  });
-
-  // Clear output
+  // ── Clear output ─────────────────────────────────────────────────────────
   clearBtn.addEventListener("click", () => {
     outputEl.textContent = "";
+    outputEl.className = "cc-output";
     outputSection.style.display = "none";
   });
 
   // ── Run button ────────────────────────────────────────────────────────────
   runBtn.addEventListener("click", async () => {
-    const code = textarea.value.trim();
+    const code = editorInst ? editorInst.getValue().trim() : "";
     if (!code) return;
 
     runBtn.disabled = true;
-    runBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg> Running…`;
-    setStatus(statusEl, "running", "Running…");
+    runBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg> Running\u2026`;
+    setStatus(statusEl, "running", "Running\u2026");
     outputSection.style.display = "block";
-    outputEl.textContent = "Executing…";
+    outputEl.className = "cc-output";
+    outputEl.textContent = "Executing\u2026";
 
     try {
       const result = await runCodeWithPiston(langSelect.value, code);
-      outputEl.textContent = result;
-      setStatus(statusEl, "success", "Done");
+
+      // ── Answer check ───────────────────────────────────────────────────
+      const normalize  = s => s.replace(/\s+/g, " ").trim();
+      const isCorrect  = expectedOutput &&
+        normalize(result) === normalize(String(expectedOutput));
+
+      if (isCorrect) {
+        outputEl.className = "cc-output cc-output--correct";
+        outputEl.innerHTML =
+          `<span class="cc-verdict cc-verdict--correct">\u2705 Correct Answer!</span>\n${escapeHtml(result)}`;
+        setStatus(statusEl, "success", "Correct! \uD83C\uDF89");
+        startConfetti();
+        if (!state.solvedIds.includes(draftKey)) {
+          state.solvedIds.push(draftKey);
+          saveState();
+          updateUI();
+        }
+      } else {
+        outputEl.className = "cc-output cc-output--wrong";
+        const hint = expectedOutput
+          ? `\n\n\u274C Expected:\n${expectedOutput}`
+          : "";
+        outputEl.innerHTML =
+          `<span class="cc-verdict cc-verdict--wrong">\u274C Not quite right</span>\n${escapeHtml(result)}${hint ? `<span class="cc-expected">${escapeHtml(hint)}</span>` : ""}`;
+        setStatus(statusEl, "error", "Try again");
+      }
     } catch (err) {
+      outputEl.className = "cc-output";
       outputEl.textContent = "\u274c " + err.message;
       setStatus(statusEl, "error", "Error");
     } finally {
@@ -749,7 +883,8 @@ function renderPracticeQuestion() {
     "compiler-widget-container",
     "practice-compiler-widget",
     q.id,
-    q.input
+    q.input,
+    q.expectedOutput
   );
 
   // Hide Java Code block initially
