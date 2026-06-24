@@ -15,21 +15,49 @@
 
 const UPSTREAM_URL = "https://api.onlinecompiler.io/api/run-code-sync/";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin":  "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
-
 export default {
   async fetch(request, env) {
+    const origin = request.headers.get("Origin");
+    
+    // Validate request origin (restrict to production site and local development)
+    let isAllowed = false;
+    if (origin) {
+      if (origin === "https://abudhar.github.io" || 
+          /^http:\/\/localhost(:\d+)?$/.test(origin) || 
+          /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) {
+        isAllowed = true;
+      }
+    }
+
+    if (!isAllowed) {
+      return new Response(JSON.stringify({ error: "Forbidden: Origin not allowed" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const corsHeaders = {
+      "Access-Control-Allow-Origin":  origin,
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    };
+
     // Handle CORS preflight
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return new Response(null, { status: 204, headers: corsHeaders });
     }
 
     if (request.method !== "POST") {
       return new Response("Method Not Allowed", { status: 405 });
+    }
+
+    // Check payload size to prevent Denial of Service (DoS) / memory abuse (limit: 100KB)
+    const contentLength = parseInt(request.headers.get("Content-Length") || "0", 10);
+    if (contentLength > 1024 * 100) {
+      return new Response(JSON.stringify({ error: "Payload too large (limit 100KB)" }), {
+        status: 413,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     }
 
     let body;
@@ -38,7 +66,7 @@ export default {
     } catch {
       return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
         status: 400,
-        headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+        headers: { "Content-Type": "application/json", ...corsHeaders },
       });
     }
 
@@ -46,7 +74,7 @@ export default {
     if (!apiKey) {
       return new Response(JSON.stringify({ error: "API_KEY secret is not configured in Cloudflare Worker settings" }), {
         status: 500,
-        headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+        headers: { "Content-Type": "application/json", ...corsHeaders },
       });
     }
 
@@ -64,7 +92,7 @@ export default {
 
     return new Response(data, {
       status:  upstream.status,
-      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+      headers: { "Content-Type": "application/json", ...corsHeaders },
     });
   },
 };
