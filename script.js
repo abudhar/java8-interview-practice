@@ -143,35 +143,39 @@ function saveActiveWidgetDraft() {
   saveState();
 }
 
-// Executes code via the Piston API (free, open, no API key required, CORS-enabled)
+// Executes code via the onlinecompiler.io REST API
 async function runCodeWithPiston(language, code) {
-  const langMap = {
-    java:       { language: "java",       version: "15.0.2"  },
-    python:     { language: "python",     version: "3.10.0"  },
-    javascript: { language: "javascript", version: "18.15.0" },
-    cpp:        { language: "c++",        version: "10.2.0"  },
+  // Compiler IDs from https://api.onlinecompiler.io/api/compilers/
+  const compilerMap = {
+    java:       "openjdk-25",
+    python:     "python-3.14",
+    javascript: "typescript-deno",
+    cpp:        "g++-15",
+    go:         "go-1.26",
+    rust:       "rust-1.93",
   };
-  const cfg = langMap[language] || langMap["java"];
+  const compiler = compilerMap[language] || "openjdk-25";
 
-  const response = await fetch("https://emkc.org/api/v2/piston/execute", {
+  const response = await fetch("https://api.onlinecompiler.io/api/run-code-sync/", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      language: cfg.language,
-      version:  cfg.version,
-      files:    [{ content: code }],
-    }),
+    headers: {
+      "Content-Type":  "application/json",
+      "Authorization": "d643e748b751a444224385959c431c35",
+    },
+    body: JSON.stringify({ compiler, code, input: "" }),
   });
 
-  if (!response.ok) throw new Error(`API error ${response.status}`);
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.message || `API error ${response.status}`);
+  }
 
   const data = await response.json();
-  const run  = data.run || {};
-  if (run.stderr && run.stderr.trim()) return run.stderr;
-  return (run.stdout && run.stdout.trim()) ? run.stdout : "(no output)";
+  if (data.error && data.error.trim()) return data.error;
+  return (data.output && data.output.trim()) ? data.output : "(no output)";
 }
 
-// Builds and injects a custom inline code editor that calls the Piston API
+// Builds and injects a custom inline code editor that calls the onlinecompiler.io API
 function loadCompilerWidget(containerId, widgetId, draftKey, defaultCode) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -189,10 +193,12 @@ function loadCompilerWidget(containerId, widgetId, draftKey, defaultCode) {
   wrapper.innerHTML = `
     <div class="cc-header">
       <select class="cc-lang-select" id="${widgetId}-lang">
-        <option value="java" selected>Java</option>
-        <option value="python">Python</option>
-        <option value="javascript">JavaScript</option>
-        <option value="cpp">C++</option>
+        <option value="java" selected>Java (OpenJDK 25)</option>
+        <option value="python">Python 3.14</option>
+        <option value="javascript">TypeScript / Deno</option>
+        <option value="cpp">C++ (G++ 15)</option>
+        <option value="go">Go 1.26</option>
+        <option value="rust">Rust 1.93</option>
       </select>
       <div class="cc-status" id="${widgetId}-status">
         <span class="cc-dot cc-dot--idle"></span>
