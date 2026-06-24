@@ -117,31 +117,25 @@ function highlightJavaCode(code) {
   return html;
 }
 
-// Save the current code draft from the active compiler widget(s) to state.drafts
+// Save the current code draft from the active custom editor(s) to state.drafts
 function saveActiveWidgetDraft() {
-  // 1. Practice Mode compiler widget
-  const practiceWidget = document.getElementById("practice-compiler-widget");
-  if (practiceWidget && practiceWidget.shadowRoot) {
-    const contentEl = practiceWidget.shadowRoot.querySelector(".cm-content");
-    if (contentEl) {
-      state.drafts[state.currentId] = contentEl.innerText || contentEl.textContent;
-    }
+  // 1. Practice Mode editor
+  const practiceTextarea = document.getElementById("practice-compiler-widget-code");
+  if (practiceTextarea) {
+    state.drafts[state.currentId] = practiceTextarea.value;
   }
 
-  // 2. Study Mode compiler widget
+  // 2. Study Mode editor
   if (state.studyActiveStep) {
-    const studyWidget = document.getElementById("study-session-compiler-widget");
-    if (studyWidget && studyWidget.shadowRoot) {
-      const contentEl = studyWidget.shadowRoot.querySelector(".cm-content");
-      if (contentEl) {
-        const items = getFilteredStudyItems();
-        const currentIdx = state.studyActiveCardIdx;
-        if (items.length > 0 && currentIdx < items.length) {
-          const item = items[currentIdx];
-          const originalIndex = state.studyActiveStep.items.indexOf(item);
-          const draftKey = `study_${state.studyActiveStep.rel_path}_${originalIndex}`;
-          state.drafts[draftKey] = contentEl.innerText || contentEl.textContent;
-        }
+    const studyTextarea = document.getElementById("study-session-compiler-widget-code");
+    if (studyTextarea) {
+      const items = getFilteredStudyItems();
+      const currentIdx = state.studyActiveCardIdx;
+      if (items.length > 0 && currentIdx < items.length) {
+        const item = items[currentIdx];
+        const originalIndex = state.studyActiveStep.items.indexOf(item);
+        const draftKey = `study_${state.studyActiveStep.rel_path}_${originalIndex}`;
+        state.drafts[draftKey] = studyTextarea.value;
       }
     }
   }
@@ -149,59 +143,149 @@ function saveActiveWidgetDraft() {
   saveState();
 }
 
-// Dynamically loads the online compiler widget into a container
+// Executes code via the Piston API (free, open, no API key required, CORS-enabled)
+async function runCodeWithPiston(language, code) {
+  const langMap = {
+    java:       { language: "java",       version: "15.0.2"  },
+    python:     { language: "python",     version: "3.10.0"  },
+    javascript: { language: "javascript", version: "18.15.0" },
+    cpp:        { language: "c++",        version: "10.2.0"  },
+  };
+  const cfg = langMap[language] || langMap["java"];
+
+  const response = await fetch("https://emkc.org/api/v2/piston/execute", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      language: cfg.language,
+      version:  cfg.version,
+      files:    [{ content: code }],
+    }),
+  });
+
+  if (!response.ok) throw new Error(`API error ${response.status}`);
+
+  const data = await response.json();
+  const run  = data.run || {};
+  if (run.stderr && run.stderr.trim()) return run.stderr;
+  return (run.stdout && run.stdout.trim()) ? run.stdout : "(no output)";
+}
+
+// Builds and injects a custom inline code editor that calls the Piston API
 function loadCompilerWidget(containerId, widgetId, draftKey, defaultCode) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  // Clear container
   container.innerHTML = "";
 
-  // Get the initial code (either user draft or default question setup code)
   const initialCode = state.drafts[draftKey] || defaultCode || "";
+  const isDark = state.theme === "dark";
 
-  // Create the widget div element
-  const widgetDiv = document.createElement("div");
-  widgetDiv.className = "runcode";
-  widgetDiv.id = widgetId;
-  // Select the appropriate widget key based on environment (local vs production)
-  const widgetKey = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-    ? "231b44df738678876a999db7ad51985c" // Localhost key (bound to port 8080)
-    : "5315adfb38c9d8f02b67196df3d9a6bd"; // Production key (bound to github.io)
+  // ── Editor wrapper ──────────────────────────────────────────────────────────
+  const wrapper = document.createElement("div");
+  wrapper.className = "custom-compiler" + (isDark ? " dark" : "");
+  wrapper.id = widgetId;
 
-  widgetDiv.setAttribute("data-key", widgetKey);
-  widgetDiv.setAttribute("data-lang", "java");
-  widgetDiv.setAttribute("data-theme", state.theme === "dark" ? "dark" : "light");
-  widgetDiv.setAttribute("data-height", "450");
-  widgetDiv.setAttribute("data-code", initialCode);
+  wrapper.innerHTML = `
+    <div class="cc-header">
+      <select class="cc-lang-select" id="${widgetId}-lang">
+        <option value="java" selected>Java</option>
+        <option value="python">Python</option>
+        <option value="javascript">JavaScript</option>
+        <option value="cpp">C++</option>
+      </select>
+      <div class="cc-status" id="${widgetId}-status">
+        <span class="cc-dot cc-dot--idle"></span>
+        <span class="cc-status-text">Ready</span>
+      </div>
+      <button class="cc-run-btn" id="${widgetId}-run-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Run
+      </button>
+    </div>
+    <div class="cc-body">
+      <textarea
+        class="cc-textarea"
+        id="${widgetId}-code"
+        spellcheck="false"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        placeholder="// Write your Java code here..."
+      >${initialCode.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</textarea>
+    </div>
+    <div class="cc-output-section" id="${widgetId}-output-section" style="display:none;">
+      <div class="cc-output-header">
+        <span class="cc-output-title">Output</span>
+        <button class="cc-clear-btn" id="${widgetId}-clear-btn">Clear</button>
+      </div>
+      <pre class="cc-output" id="${widgetId}-output"></pre>
+    </div>
+  `;
 
-  // Append to container
-  container.appendChild(widgetDiv);
+  container.appendChild(wrapper);
 
-  // Dynamically load/re-execute the widget script to initialize the CodeMirror editor
-  const scriptId = "online-compiler-widget-script";
-  let script = document.getElementById(scriptId);
-  if (script) {
-    script.remove(); // Remove old script tag to force browser to reload and re-execute
-  }
+  // ── Refs ─────────────────────────────────────────────────────────────────
+  const textarea      = document.getElementById(`${widgetId}-code`);
+  const runBtn        = document.getElementById(`${widgetId}-run-btn`);
+  const statusEl      = document.getElementById(`${widgetId}-status`);
+  const outputSection = document.getElementById(`${widgetId}-output-section`);
+  const outputEl      = document.getElementById(`${widgetId}-output`);
+  const clearBtn      = document.getElementById(`${widgetId}-clear-btn`);
+  const langSelect    = document.getElementById(`${widgetId}-lang`);
 
-  script = document.createElement("script");
-  script.id = scriptId;
-  // Use a cache-buster query parameter to force browser to run it on the newly added DOM element
-  script.src = "https://onlinecompiler.io/widget.js?t=" + Date.now();
-  script.async = true;
-  document.body.appendChild(script);
-
-  // Listen for input events on the widget element (composed events bubble up from Shadow DOM)
-  widgetDiv.addEventListener("input", () => {
-    if (widgetDiv.shadowRoot) {
-      const contentEl = widgetDiv.shadowRoot.querySelector(".cm-content");
-      if (contentEl) {
-        state.drafts[draftKey] = contentEl.innerText || contentEl.textContent;
-        saveState();
-      }
+  // Tab key inserts spaces instead of leaving the field
+  textarea.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const s = textarea.selectionStart;
+      const v = textarea.value;
+      textarea.value = v.substring(0, s) + "    " + v.substring(textarea.selectionEnd);
+      textarea.selectionStart = textarea.selectionEnd = s + 4;
     }
   });
+
+  // Save draft on every keystroke
+  textarea.addEventListener("input", () => {
+    state.drafts[draftKey] = textarea.value;
+    saveState();
+  });
+
+  // Clear output
+  clearBtn.addEventListener("click", () => {
+    outputEl.textContent = "";
+    outputSection.style.display = "none";
+  });
+
+  // ── Run button ────────────────────────────────────────────────────────────
+  runBtn.addEventListener("click", async () => {
+    const code = textarea.value.trim();
+    if (!code) return;
+
+    runBtn.disabled = true;
+    runBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg> Running…`;
+    setStatus(statusEl, "running", "Running…");
+    outputSection.style.display = "block";
+    outputEl.textContent = "Executing…";
+
+    try {
+      const result = await runCodeWithPiston(langSelect.value, code);
+      outputEl.textContent = result;
+      setStatus(statusEl, "success", "Done");
+    } catch (err) {
+      outputEl.textContent = "\u274c " + err.message;
+      setStatus(statusEl, "error", "Error");
+    } finally {
+      runBtn.disabled = false;
+      runBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run`;
+      setTimeout(() => setStatus(statusEl, "idle", "Ready"), 4000);
+    }
+  });
+}
+
+// Helper: update the status indicator inside the editor header
+function setStatus(statusEl, type, text) {
+  statusEl.innerHTML = `<span class="cc-dot cc-dot--${type}"></span><span class="cc-status-text">${text}</span>`;
 }
 
 // Reusable Toast Alerts
