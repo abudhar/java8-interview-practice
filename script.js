@@ -65,6 +65,17 @@ function saveState() {
   localStorage.setItem("j8_study_active_module", state.studyActiveModule || "m1");
 }
 
+// Helper to escape HTML characters
+function escapeHtml(text) {
+  if (text === null || text === undefined) return "";
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 // Custom Java Code Syntax Highlighter
 function highlightJavaCode(code) {
   // Escape HTML tags
@@ -428,10 +439,53 @@ function loadCompilerWidget(containerId, widgetId, draftKey, defaultCode, expect
           `<span class="cc-verdict cc-verdict--correct">\u2705 Correct Answer!</span>\n${escapeHtml(result)}`;
         setStatus(statusEl, "success", "Correct! \uD83C\uDF89");
         startConfetti();
-        if (!state.solvedIds.includes(draftKey)) {
-          state.solvedIds.push(draftKey);
-          saveState();
-          updateUI();
+        
+        if (typeof draftKey === "string" && draftKey.startsWith("study_")) {
+          // Format: study_path_index
+          // E.g., study_module1/step1_0
+          const parts = draftKey.split("_");
+          if (parts.length >= 3) {
+            const originalIndex = parseInt(parts.pop(), 10);
+            const relPath = parts.slice(1).join("_");
+            
+            if (!state.studyMastered[relPath]) {
+              state.studyMastered[relPath] = [];
+            }
+            if (!state.studyMastered[relPath].includes(originalIndex)) {
+              state.studyMastered[relPath].push(originalIndex);
+              saveState();
+              
+              // Update study session UI if still on this card
+              if (state.studyActiveStep && state.studyActiveStep.rel_path === relPath) {
+                const masteredBtn = document.getElementById("study-session-mastered-btn");
+                const masteredText = document.getElementById("study-session-mastered-text");
+                if (masteredBtn && masteredText) {
+                  masteredText.textContent = "Mastered";
+                  masteredBtn.style.backgroundColor = "var(--accent-success)";
+                }
+              }
+            }
+          }
+        } else {
+          // It's a normal practice question
+          const qId = parseInt(draftKey, 10);
+          if (!isNaN(qId)) {
+            if (!state.solved.includes(qId)) {
+              state.solved.push(qId);
+              saveState();
+              updateGlobalProgress();
+              
+              // Update practice page solved button directly if it's the current question
+              if (qId === state.currentId) {
+                const solvedText = document.getElementById("practice-mark-solved-text");
+                const solvedBtn = document.getElementById("practice-mark-solved-btn");
+                if (solvedText && solvedBtn) {
+                  solvedText.textContent = "Solved";
+                  solvedBtn.style.backgroundColor = "var(--accent-success)";
+                }
+              }
+            }
+          }
         }
       } else {
         outputEl.className = "cc-output cc-output--wrong";
