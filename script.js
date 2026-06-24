@@ -221,6 +221,7 @@ function ensureMonaco(cb) {
 }
 
 // Registers Java 8 Stream API autocomplete suggestions in Monaco
+// Registers Java 8 Stream API and local variable autocomplete suggestions in Monaco
 function _registerJava8Completions() {
   monaco.languages.registerCompletionItemProvider("java", {
     triggerCharacters: [".", " "],
@@ -230,70 +231,135 @@ function _registerJava8Completions() {
         startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
         startColumn: word.startColumn,        endColumn: word.endColumn,
       };
+      
       const mk = monaco.languages.CompletionItemKind;
       const Rule = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;
-      const items = [
-        // Stream pipeline
-        ["stream()",                       "Create a stream from collection",             "stream()",                            mk.Method],
-        ["filter()",                        "Keep elements matching predicate",            "filter(${1:x -> x})",                 mk.Method],
-        ["map()",                           "Transform each element",                     "map(${1:x -> x})",                    mk.Method],
-        ["flatMap()",                       "Flatten nested streams",                     "flatMap(${1:x -> x.stream()})",       mk.Method],
-        ["mapToInt()",                      "Map to IntStream",                           "mapToInt(${1:Integer::intValue})",    mk.Method],
-        ["collect()",                       "Collect stream to collection",               "collect(${1:Collectors.toList()})",   mk.Method],
-        ["forEach()",                       "Iterate each element",                      "forEach(${1:System.out::println})",   mk.Method],
-        ["sorted()",                        "Sort elements (natural order)",              "sorted()",                            mk.Method],
-        ["sorted(Comparator)",              "Sort with comparator",                      "sorted(${1:Comparator.reverseOrder()})", mk.Method],
-        ["distinct()",                      "Remove duplicates",                         "distinct()",                          mk.Method],
-        ["limit()",                         "Limit stream to n elements",                "limit(${1:10})",                      mk.Method],
-        ["skip()",                          "Skip first n elements",                     "skip(${1:5})",                        mk.Method],
-        ["count()",                         "Count elements in stream",                  "count()",                             mk.Method],
-        ["findFirst()",                     "Return first element as Optional",          "findFirst()",                         mk.Method],
-        ["findAny()",                       "Return any element as Optional",            "findAny()",                           mk.Method],
-        ["reduce()",                        "Reduce stream to single value",             "reduce(${1:0}, ${2:Integer::sum})",   mk.Method],
-        ["anyMatch()",                      "True if any element matches",               "anyMatch(${1:x -> x})",               mk.Method],
-        ["allMatch()",                      "True if all elements match",                "allMatch(${1:x -> x})",               mk.Method],
-        ["noneMatch()",                     "True if no element matches",                "noneMatch(${1:x -> x})",              mk.Method],
-        ["min()",                           "Find minimum element",                      "min(${1:Comparator.naturalOrder()})", mk.Method],
-        ["max()",                           "Find maximum element",                      "max(${1:Comparator.naturalOrder()})", mk.Method],
-        ["peek()",                          "Peek at each element (debug)",              "peek(${1:System.out::println})",      mk.Method],
-        // Collectors
-        ["Collectors.toList()",             "Collect to ArrayList",                      "Collectors.toList()",                  mk.Class],
-        ["Collectors.toSet()",              "Collect to HashSet",                        "Collectors.toSet()",                   mk.Class],
-        ["Collectors.toUnmodifiableList()", "Collect to unmodifiable List",              "Collectors.toUnmodifiableList()",      mk.Class],
-        ["Collectors.joining()",            "Join strings with delimiter",               "Collectors.joining(\"${1:, }\")",     mk.Class],
-        ["Collectors.joining(d,p,s)",       "Join with delimiter, prefix, suffix",       "Collectors.joining(\"${1:,}\", \"${2:Prefix}\", \"${3:Suffix}\")", mk.Class],
-        ["Collectors.groupingBy()",         "Group elements by classifier",              "Collectors.groupingBy(${1:Function.identity()})", mk.Class],
-        ["Collectors.counting()",           "Count elements per group",                  "Collectors.counting()",                mk.Class],
-        ["Collectors.partitioningBy()",     "Partition into two groups (true/false)",   "Collectors.partitioningBy(${1:x -> x % 2 == 0})", mk.Class],
-        ["Collectors.toMap()",              "Collect to Map",                            "Collectors.toMap(${1:k -> k}, ${2:v -> v})", mk.Class],
-        ["Collectors.summarizingInt()",     "Get IntSummaryStatistics",                  "Collectors.summarizingInt(${1:Integer::intValue})", mk.Class],
-        // Method references
-        ["System.out::println",             "Print each element",                        "System.out::println",                  mk.Reference],
-        ["Integer::parseInt",               "Parse String to int",                       "Integer::parseInt",                    mk.Reference],
-        ["Integer::intValue",               "Unbox Integer to int",                      "Integer::intValue",                    mk.Reference],
-        ["String::valueOf",                 "Convert to String",                         "String::valueOf",                      mk.Reference],
-        ["String::toUpperCase",             "Map to uppercase",                          "String::toUpperCase",                  mk.Reference],
-        ["String::toLowerCase",             "Map to lowercase",                          "String::toLowerCase",                  mk.Reference],
-        ["String::length",                  "Get string length",                         "String::length",                       mk.Reference],
-        ["Function.identity()",             "Returns the input unchanged",               "Function.identity()",                  mk.Class],
-        ["Comparator.reverseOrder()",       "Reverse/descending comparator",             "Comparator.reverseOrder()",            mk.Class],
-        ["Comparator.naturalOrder()",       "Natural/ascending comparator",              "Comparator.naturalOrder()",            mk.Class],
-        ["Comparator.comparing()",          "Compare by key extractor",                  "Comparator.comparing(${1:x -> x})",   mk.Class],
-        // Optional
-        ["Optional.of()",                   "Wrap non-null value in Optional",           "Optional.of(${1:value})",              mk.Class],
-        ["Optional.empty()",                "Create empty Optional",                     "Optional.empty()",                     mk.Class],
-        ["Optional.ofNullable()",           "Wrap nullable value in Optional",           "Optional.ofNullable(${1:value})",      mk.Class],
-        // Helpers
-        ["Arrays.asList()",                 "Create fixed-size list",                    "Arrays.asList(${1})",                  mk.Class],
-        ["Collections.sort()",              "Sort a list in place",                      "Collections.sort(${1:list})",          mk.Class],
-        ["System.out.println()",            "Print line to console",                     "System.out.println(${1})",             mk.Function],
-      ];
-      return {
-        suggestions: items.map(([label, detail, insertText, kind]) => ({
+
+      // Determine if this is a member access (preceded by a dot)
+      const lineContent = model.getLineContent(position.lineNumber);
+      const beforeWord = lineContent.substring(0, word.startColumn - 1).trim();
+      const isMemberAccess = beforeWord.endsWith(".");
+
+      if (isMemberAccess) {
+        // Only suggest member methods that can be chained after a dot
+        const memberMethods = [
+          ["stream()",                       "Create a stream from collection",             "stream()",                            mk.Method],
+          ["filter()",                        "Keep elements matching predicate",            "filter(${1:x -> x})",                 mk.Method],
+          ["map()",                           "Transform each element",                     "map(${1:x -> x})",                    mk.Method],
+          ["flatMap()",                       "Flatten nested streams",                     "flatMap(${1:x -> x.stream()})",       mk.Method],
+          ["mapToInt()",                      "Map to IntStream",                           "mapToInt(${1:Integer::intValue})",    mk.Method],
+          ["collect()",                       "Collect stream to collection",               "collect(${1:Collectors.toList()})",   mk.Method],
+          ["forEach()",                       "Iterate each element",                      "forEach(${1:System.out::println})",   mk.Method],
+          ["sorted()",                        "Sort elements (natural order)",              "sorted()",                            mk.Method],
+          ["sorted(Comparator)",              "Sort with comparator",                      "sorted(${1:Comparator.reverseOrder()})", mk.Method],
+          ["distinct()",                      "Remove duplicates",                         "distinct()",                          mk.Method],
+          ["limit()",                         "Limit stream to n elements",                "limit(${1:10})",                      mk.Method],
+          ["skip()",                          "Skip first n elements",                     "skip(${1:5})",                        mk.Method],
+          ["count()",                         "Count elements in stream",                  "count()",                             mk.Method],
+          ["findFirst()",                     "Return first element as Optional",          "findFirst()",                         mk.Method],
+          ["findAny()",                       "Return any element as Optional",            "findAny()",                           mk.Method],
+          ["reduce()",                        "Reduce stream to single value",             "reduce(${1:0}, ${2:Integer::sum})",   mk.Method],
+          ["anyMatch()",                      "True if any element matches",               "anyMatch(${1:x -> x})",               mk.Method],
+          ["allMatch()",                      "True if all elements match",                "allMatch(${1:x -> x})",               mk.Method],
+          ["noneMatch()",                     "True if no element matches",                "noneMatch(${1:x -> x})",              mk.Method],
+          ["min()",                           "Find minimum element",                      "min(${1:Comparator.naturalOrder()})", mk.Method],
+          ["max()",                           "Find maximum element",                      "max(${1:Comparator.naturalOrder()})", mk.Method],
+          ["peek()",                          "Peek at each element (debug)",              "peek(${1:System.out::println})",      mk.Method],
+          ["length()",                         "Get string length",                         "length()",                            mk.Method],
+          ["toUpperCase()",                    "Convert string to uppercase",               "toUpperCase()",                       mk.Method],
+          ["toLowerCase()",                    "Convert string to lowercase",               "toLowerCase()",                       mk.Method],
+          ["charAt()",                         "Get character at index",                    "charAt(${1:0})",                      mk.Method],
+        ];
+
+        return {
+          suggestions: memberMethods.map(([label, detail, insertText, kind]) => ({
+            label, kind, detail, insertText, range,
+            insertTextRules: Rule,
+          })),
+        };
+      } else {
+        // Not a member access: suggest local variables, static classes, references, and helpers
+        const text = model.getValue();
+        const foundVars = new Set();
+        
+        // Excluded Java keywords/types that shouldn't be suggested as custom variables
+        const excluded = new Set([
+          "public", "private", "protected", "class", "interface", "void", "return",
+          "new", "if", "else", "for", "while", "do", "static", "final", "import", "package",
+          "true", "false", "null", "this", "super", "throws", "throw", "try", "catch", "finally",
+          "int", "double", "float", "long", "short", "byte", "char", "boolean", "String"
+        ]);
+
+        // Regex to find variable declarations: e.g. List<String> list = ... or int count = ...
+        const varRegex = /\b([A-Za-z_][A-Za-z0-9_<>,\s\?\[\]]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|,|;|:|\))/g;
+        // Regex to find lambda parameters: e.g. s -> ...
+        const lambdaRegex = /\b([A-Za-z_][A-Za-z0-9_]*)\s*->/g;
+
+        let m;
+        while ((m = varRegex.exec(text)) !== null) {
+          const varName = m[2];
+          if (!excluded.has(varName) && !/^\d+$/.test(varName)) {
+            foundVars.add(varName);
+          }
+        }
+        while ((m = lambdaRegex.exec(text)) !== null) {
+          const varName = m[1];
+          if (!excluded.has(varName) && !/^\d+$/.test(varName)) {
+            foundVars.add(varName);
+          }
+        }
+
+        const varSuggestions = Array.from(foundVars).map(v => ({
+          label: v,
+          kind: mk.Variable,
+          detail: "Local Variable",
+          insertText: v,
+          range: range
+        }));
+
+        const staticHelpers = [
+          // Collectors
+          ["Collectors.toList()",             "Collect to ArrayList",                      "Collectors.toList()",                  mk.Class],
+          ["Collectors.toSet()",              "Collect to HashSet",                        "Collectors.toSet()",                   mk.Class],
+          ["Collectors.toUnmodifiableList()", "Collect to unmodifiable List",              "Collectors.toUnmodifiableList()",      mk.Class],
+          ["Collectors.joining()",            "Join strings with delimiter",               "Collectors.joining(\"${1:, }\")",     mk.Class],
+          ["Collectors.joining(d,p,s)",       "Join with delimiter, prefix, suffix",       "Collectors.joining(\"${1:,}\", \"${2:Prefix}\", \"${3:Suffix}\")", mk.Class],
+          ["Collectors.groupingBy()",         "Group elements by classifier",              "Collectors.groupingBy(${1:Function.identity()})", mk.Class],
+          ["Collectors.counting()",           "Count elements per group",                  "Collectors.counting()",                mk.Class],
+          ["Collectors.partitioningBy()",     "Partition into two groups (true/false)",   "Collectors.partitioningBy(${1:x -> x % 2 == 0})", mk.Class],
+          ["Collectors.toMap()",              "Collect to Map",                            "Collectors.toMap(${1:k -> k}, ${2:v -> v})", mk.Class],
+          ["Collectors.summarizingInt()",     "Get IntSummaryStatistics",                  "Collectors.summarizingInt(${1:Integer::intValue})", mk.Class],
+          // Method references
+          ["System.out::println",             "Print each element",                        "System.out::println",                  mk.Reference],
+          ["Integer::parseInt",               "Parse String to int",                       "Integer::parseInt",                    mk.Reference],
+          ["Integer::intValue",               "Unbox Integer to int",                      "Integer::intValue",                    mk.Reference],
+          ["String::valueOf",                 "Convert to String",                         "String::valueOf",                      mk.Reference],
+          ["String::toUpperCase",             "Map to uppercase",                          "String::toUpperCase",                  mk.Reference],
+          ["String::toLowerCase",             "Map to lowercase",                          "String::toLowerCase",                  mk.Reference],
+          ["String::length",                  "Get string length",                         "String::length",                       mk.Reference],
+          ["Function.identity()",             "Returns the input unchanged",               "Function.identity()",                  mk.Class],
+          ["Comparator.reverseOrder()",       "Reverse/descending comparator",             "Comparator.reverseOrder()",            mk.Class],
+          ["Comparator.naturalOrder()",       "Natural/ascending comparator",              "Comparator.naturalOrder()",            mk.Class],
+          ["Comparator.comparing()",          "Compare by key extractor",                  "Comparator.comparing(${1:x -> x})",   mk.Class],
+          // Optional
+          ["Optional.of()",                   "Wrap non-null value in Optional",           "Optional.of(${1:value})",              mk.Class],
+          ["Optional.empty()",                "Create empty Optional",                     "Optional.empty()",                     mk.Class],
+          ["Optional.ofNullable()",           "Wrap nullable value in Optional",           "Optional.ofNullable(${1:value})",      mk.Class],
+          // Helpers
+          ["Arrays.asList()",                 "Create fixed-size list",                    "Arrays.asList(${1})",                  mk.Class],
+          ["Collections.sort()",              "Sort a list in place",                      "Collections.sort(${1:list})",          mk.Class],
+          ["System.out.println()",            "Print line to console",                     "System.out.println(${1})",             mk.Function],
+        ];
+
+        const staticSuggestions = staticHelpers.map(([label, detail, insertText, kind]) => ({
           label, kind, detail, insertText, range,
           insertTextRules: Rule,
-        })),
-      };
+        }));
+
+        return {
+          suggestions: [...varSuggestions, ...staticSuggestions],
+        };
+      }
     },
   });
 }
@@ -305,7 +371,10 @@ function loadCompilerWidget(containerId, widgetId, draftKey, defaultCode, expect
 
   container.innerHTML = "";
 
-  const initialCode = state.drafts[draftKey] || defaultCode || "";
+  let initialCode = state.drafts[draftKey];
+  if (!initialCode) {
+    initialCode = (defaultCode && !/\bclass\s+\w+/.test(defaultCode)) ? wrapJavaCode(defaultCode) : (defaultCode || "");
+  }
   const isDark      = state.theme === "dark";
 
   // Monaco language IDs per compiler key
@@ -382,6 +451,7 @@ function loadCompilerWidget(containerId, widgetId, draftKey, defaultCode, expect
       padding:                { top: 14, bottom: 14 },
       suggestOnTriggerCharacters: true,
       quickSuggestions:       { other: true, comments: false, strings: false },
+      wordBasedSuggestions:   "currentDocument",
       acceptSuggestionOnEnter: "on",
       roundedSelection:       true,
       cursorBlinking:         "smooth",
